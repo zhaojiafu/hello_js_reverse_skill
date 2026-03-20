@@ -11,6 +11,42 @@
 - **协议层对抗**: TLS 指纹检测、HTTP/2 强制、频率限制等协议层防护的应对
 - **MCP 工具深度集成**: 源码搜索、断点调试、Hook注入、网络监听全自动化
 
+## 一键使用
+
+### 方式一：AI 对话框直接安装（推荐）
+
+在你的 AI 编码工具（Cursor / Claude Code / Windsurf 等）的对话框中输入：
+
+```
+请帮我配置skill并在后续触发相关操作的时候查阅该skill：https://github.com/WhiteNightShadow/hello_js_reverse_skill
+```
+
+AI 会自动完成下载、配置，并在后续 JS 逆向相关任务中自动调用该 Skill。
+
+### 方式二：手动安装
+
+将本仓库克隆到对应 AI 工具的 skills 目录下：
+
+**Cursor：**
+
+```bash
+git clone https://github.com/WhiteNightShadow/hello_js_reverse_skill.git ~/.cursor/skills/hello_js_reverse_skill
+```
+
+**Claude Code（Codex CLI）：**
+
+```bash
+git clone https://github.com/WhiteNightShadow/hello_js_reverse_skill.git ~/.codex/skills/hello_js_reverse_skill
+```
+
+**VSCode（Copilot / Cline 等插件）：**
+
+```bash
+git clone https://github.com/WhiteNightShadow/hello_js_reverse_skill.git ~/.vscode/skills/hello_js_reverse_skill
+```
+
+> 安装完成后，AI Agent 会自动读取 `SKILL.md` 获取 JS 逆向分析能力。当你在对话中涉及 JS 加密分析、网站逆向、参数签名还原等场景时，Skill 会自动激活。
+
 ## 项目结构
 
 
