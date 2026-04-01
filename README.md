@@ -147,12 +147,11 @@ node main.js
 
 ## MCP 工具集成
 
-本 Skill 深度集成两个 MCP 服务器：
-
-### js-reverse MCP
+本 Skill 深度集成 js-reverse MCP 服务器：
 
 | 核心工具 | 用途 |
 |---------|------|
+| `list_pages` / `select_page` | 连接已打开的真实浏览器页面 |
 | `search_in_sources` | 在所有 JS 源码中搜索加密关键词 |
 | `set_breakpoint_on_text` | 按代码文本设置断点 |
 | `trace_function` | 追踪函数调用，自动记录参数和返回值 |
@@ -160,17 +159,6 @@ node main.js
 | `break_on_xhr` | XHR 请求断点 |
 | `get_paused_info` | 获取断点处的调用栈和变量 |
 | `save_script_source` | 保存脚本到本地分析 |
-
-### chrome-devtools MCP
-
-| 核心工具 | 用途 |
-|---------|------|
-| `new_page` / `navigate_page` | 页面导航 |
-| `click` / `fill` / `type_text` | UI 交互 |
-| `evaluate_script` | 在页面执行 JS |
-| `take_screenshot` / `take_snapshot` | 截图/DOM快照 |
-| `emulate` | 模拟 UA/设备/网络 |
-| `get_network_request` | 获取请求详情（支持保存响应体） |
 
 详见 `references/mcp-cookbook.md`。
 
