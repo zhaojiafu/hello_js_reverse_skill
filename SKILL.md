@@ -40,7 +40,7 @@ argument-hint: "<目标URL> [需要分析的加密参数名, 如 sign, m, token]
 核心能力覆盖：
 - **签名参数还原**：常规算法（AES、DES、MD5、SHA 系列、Base64、RSA、HMAC 等）优先使用 Node.js 内置 `crypto` 模块或 `crypto-js` 等库直接实现；对于复杂的自定义签名逻辑，可使用 `vm` 模块在沙箱中执行提取的业务代码。
 - **接口调试与分析**：根据抓包信息定位请求中的签名参数；通过浏览器 DevTools 断点、Hook、脚本注入追踪参数生成流程；根据调试日志逐步追踪参数的完整生成链路。
-- **浏览器动态调试**：直接连接用户已打开的真实 Chrome 浏览器，在真实页面上设置断点、注入 Hook、追踪调用栈，获取运行时变量和加密中间值。
+- **浏览器动态调试**：通过 js-reverse MCP 新建独立的可调试浏览器实例，在调试页面上设置断点、注入 Hook、追踪调用栈，获取运行时变量和加密中间值，不干扰用户日常 Chrome。
 
 ## 核心武器
 
@@ -71,54 +71,74 @@ argument-hint: "<目标URL> [需要分析的加密参数名, 如 sign, m, token]
    - `wait_for`：等待页面元素/文本
 
 **核心原则：**
-1. **真实浏览器优先**：所有调试操作必须首先在用户已打开的真实 Chrome 浏览器上执行，直接连接并操作真实页面
-2. **能用 MCP 就不手动**：能自动化就不要求用户操作
-3. **两个 MCP 交替配合**：形成分析闭环
+1. **独立调试浏览器**：不接管用户正在使用的 Chrome，通过 js-reverse MCP 新建独立的可调试浏览器实例进行分析
+2. **Cookie 自动迁移**：用户提供 Cookie 时，自动写入调试浏览器，还原登录态
+3. **能用 MCP 就不手动**：能自动化就不要求用户操作
 
 ## 浏览器连接策略（最高优先级）
 
-**每次任务开始时，必须执行以下连接流程，禁止跳过：**
+**每次任务开始时，必须执行以下流程，禁止跳过：**
 
-### 连接流程
+### 启动流程
 
 ```
-步骤 1: 列出已有页面
-  - [js-reverse] list_pages → 获取真实浏览器中所有已打开的页面列表
-  - [chrome-devtools] list_pages → 同步获取页面列表
+步骤 1: 通过 js-reverse MCP 新建调试页面
+  - [js-reverse] new_page(url="目标URL") → 创建独立的可调试浏览器页面
+  - 该浏览器实例与用户日常使用的 Chrome 完全独立，不会影响用户正常浏览
+  - 等待页面加载完成
 
-步骤 2: 匹配目标页面
-  - 遍历页面列表，按以下优先级匹配：
-    ① URL 完全匹配目标网站的页面
-    ② URL 域名匹配目标网站的页面
-    ③ 用户正在浏览/交互的活跃页面
-  - 如果找到匹配页面 → 步骤 3
-  - 如果没有匹配页面 → 步骤 4
+步骤 2: Cookie 写入（如需登录态）
+  - 如果用户提供了 Cookie（字符串或 JSON 格式），通过脚本注入写入调试浏览器：
+  - [js-reverse] evaluate_script → 执行 Cookie 写入脚本：
+  
+    方式 A — 用户提供 Cookie 字符串（如从浏览器 DevTools 复制）：
+      document.cookie = "key1=value1; path=/; domain=.example.com";
+      document.cookie = "key2=value2; path=/; domain=.example.com";
+      （逐条写入，每条一个 document.cookie 赋值）
+    
+    方式 B — 用户提供完整 Cookie Header 值：
+      将 "k1=v1; k2=v2; k3=v3" 拆分后逐条写入 document.cookie
+    
+    方式 C — 用户提供 JSON 格式 Cookie（如从 EditThisCookie 导出）：
+      遍历数组，逐条写入 document.cookie，保留 domain/path/expires 等属性
 
-步骤 3: 选择已有页面（优先路径）
-  - [js-reverse] select_page(pageIdx=匹配页面索引)
-  - [chrome-devtools] select_page(pageId=匹配页面ID, bringToFront=true)
-  - 确认选择成功后，直接进入后续分析阶段
-  - 注意：两个 MCP 的 select_page 参数不同：
-    - js-reverse 使用 pageIdx（页面索引）
-    - chrome-devtools 使用 pageId（页面ID）
+  - [js-reverse] navigate_page(type="reload") → 写入 Cookie 后刷新页面使其生效
+  - [js-reverse] evaluate_script(expression="document.cookie") → 验证 Cookie 写入成功
 
-步骤 4: 仅在无匹配页面时创建新标签页（降级方案）
-  - 告知用户：未找到目标页面，将创建新标签页
-  - [chrome-devtools] new_page(url="目标URL")
-  - 或 [js-reverse] new_page(url="目标URL")
+步骤 3: 确认页面状态
+  - [js-reverse] list_pages → 确认调试浏览器页面正常
+  - [js-reverse] select_page(pageIdx=目标页面索引) → 选中工作页面
+  - 确认页面已正确加载目标内容（特别是需要登录态的场景）
+```
+
+### Cookie 获取指引
+
+当用户需要分析登录态接口但尚未提供 Cookie 时，给出以下指引：
+
+```
+请从你正在使用的 Chrome 浏览器中获取 Cookie，以下任一方式均可：
+
+方式 1：DevTools 控制台
+  - 打开目标网站 → F12 → Console → 输入 document.cookie → 复制结果
+
+方式 2：DevTools Network 面板
+  - 打开目标网站 → F12 → Network → 找到任意请求 → 复制 Request Headers 中的 Cookie 值
+
+方式 3：浏览器扩展
+  - 使用 EditThisCookie 等扩展导出 JSON 格式的 Cookie
 ```
 
 ### 关键规则
 
-1. **绝对禁止**在未执行 `list_pages` 检查的情况下直接调用 `new_page`
-2. 用户已打开目标网站时，**必须复用已有页面**，不得创建重复标签页
-3. 在真实浏览器页面上执行的所有操作（断点、Hook、脚本注入）都会**即时生效**在用户可见的页面上
-4. 使用 `select_page` 选中页面后，后续所有 MCP 操作都在该页面上下文中执行
-5. 如果用户在真实浏览器中手动切换了页面，需要重新 `list_pages` + `select_page` 确认当前上下文
+1. **不接管用户浏览器**：始终通过 `new_page` 创建独立调试浏览器，用户的日常 Chrome 不受影响
+2. **Cookie 先行**：需要登录态的场景，必须先完成 Cookie 写入和验证，再进行后续分析
+3. 使用 `select_page` 选中页面后，后续所有 MCP 操作都在该调试页面上下文中执行
+4. 调试浏览器中的所有操作（断点、Hook、脚本注入）不会影响用户正在使用的浏览器
+5. 如果 Cookie 过期或失效，提示用户重新获取并写入
 
 ## 工作流程
 
-### Phase 0：任务理解与浏览器连接
+### Phase 0：任务理解与调试环境搭建
 
 收到用户的目标 URL 和分析需求后：
 
@@ -128,27 +148,25 @@ argument-hint: "<目标URL> [需要分析的加密参数名, 如 sign, m, token]
    - 识别并标记其中的签名/动态参数（如 `sign`、`token`、`timestamp`、`nonce` 等）
    - 根据参数特征（长度、字符集、结构）给出算法的初步判断
    - 以简洁表格或列表形式汇总分析结果，与用户确认后再进入下一步
-3. **连接真实浏览器**（按「浏览器连接策略」执行）：
-   - 调用 `list_pages` 列出用户真实 Chrome 中已打开的所有页面
-   - 查找并 `select_page` 选中目标页面（优先复用已有页面）
-   - 仅在未找到目标页面时才 `new_page` 创建新标签页
+3. **搭建调试环境**（按「浏览器连接策略」执行）：
+   - 通过 `new_page` 新建独立的可调试浏览器页面，打开目标 URL
+   - 如果用户提供了 Cookie，通过 `evaluate_script` 写入 Cookie 并刷新页面
+   - 如果需要登录态但用户未提供 Cookie，按「Cookie 获取指引」引导用户获取
+   - 确认调试浏览器页面正常加载目标内容
 4. 创建项目目录（以目标网站/功能命名），结构参考 `templates/` 下的模板
 
 ### Phase 1：目标侦察（自动执行）
 
 使用 MCP 工具完成以下侦察，**不需要用户手动操作**：
 
-#### 1.1 连接页面与观察
+#### 1.1 确认调试页面状态
 
 ```
 Actions:
-  - Phase 0 中已通过 list_pages + select_page 连接到真实浏览器页面
-  - 如果页面已在目标状态，直接开始观察，无需重新加载
-  - [chrome-devtools] take_snapshot → 获取当前页面结构和内容
-  - [chrome-devtools] take_screenshot → 截取当前页面视觉状态
-  - 如需导航到特定子页面：[chrome-devtools] navigate_page(type="url", url="目标子页面")
-  
-  注意：不要使用 new_page，在已选中的真实页面上直接操作
+  - Phase 0 中已通过 new_page 创建独立调试浏览器并加载目标页面
+  - [js-reverse] take_screenshot → 截取当前调试页面视觉状态，确认页面正常
+  - 如需导航到特定子页面：[js-reverse] navigate_page(type="url", url="目标子页面")
+  - 如果涉及登录态，确认 Cookie 已写入且页面内容正确
 ```
 
 #### 1.2 网络请求捕获
@@ -162,7 +180,7 @@ Actions:
     - Request Headers（Cookie、自定义签名头）
     - Query Params / Request Body（识别加密参数）
     - Response 数据结构
-  - [chrome-devtools] evaluate_script → 触发翻页/交互，产生更多请求
+  - [js-reverse] evaluate_script → 在调试浏览器中触发翻页/交互，产生更多请求
   - 重复上述步骤，收集多次请求进行对比
 ```
 
@@ -204,11 +222,11 @@ Headers：
   3. [如：AES-CBC加密]
 ```
 
-### Phase 2：源码分析（在真实浏览器上使用 js-reverse MCP）
+### Phase 2：源码分析（在调试浏览器上使用 js-reverse MCP）
 
-根据 Phase 1 识别到的加密参数，在用户已打开的真实浏览器页面上深入 JS 源码：
+根据 Phase 1 识别到的加密参数，在调试浏览器页面上深入 JS 源码：
 
-**前置确认**：确保 js-reverse MCP 已通过 `select_page` 选中正确的真实浏览器页面。
+**前置确认**：确保 js-reverse MCP 已选中正确的调试浏览器页面。
 如果不确定，先 `list_pages` 重新确认页面状态。
 
 #### 2.1 关键词搜索定位
@@ -216,7 +234,7 @@ Headers：
 ```
 Actions:
   - [js-reverse] search_in_sources(query="加密参数名")
-    → 直接在真实浏览器已加载的 JS 源码中搜索，结果即为用户实际看到的页面代码
+    → 直接在调试浏览器已加载的 JS 源码中搜索
   - [js-reverse] search_in_sources(query="encrypt|sign|token|md5|sha|aes|des|rsa|hmac|btoa|atob|CryptoJS")
   - [js-reverse] search_in_sources(query="XMLHttpRequest|$.ajax|fetch|beforeSend")
   - [js-reverse] search_in_sources(query="document.cookie")
@@ -270,12 +288,12 @@ Actions:
   - 用中文注释标注每个函数的作用、输入输出
 ```
 
-### Phase 3：动态验证（在真实浏览器上 js-reverse + chrome-devtools 配合）
+### Phase 3：动态验证（在调试浏览器上使用 js-reverse MCP）
 
-对静态分析的结论，在用户真实浏览器页面上进行运行时验证：
+对静态分析的结论，在调试浏览器页面上进行运行时验证：
 
-**前置确认**：确保两个 MCP 都已 `select_page` 选中同一个真实浏览器页面。
-所有断点、Hook、脚本执行都会直接作用于用户可见的真实页面。
+**前置确认**：确保 js-reverse MCP 已选中正确的调试浏览器页面。
+所有断点、Hook、脚本执行都在独立的调试浏览器中进行，不影响用户日常浏览。
 
 #### 3.1 Hook 注入验证
 
@@ -289,10 +307,8 @@ Actions:
     ③ 加密函数 Hook — 记录入参和返回值
     ④ eval/Function Hook — 捕获动态代码
     
-  - [js-reverse] navigate_page(type="reload") → 在真实浏览器中重新加载触发 Hook
+  - [js-reverse] navigate_page(type="reload") → 在调试浏览器中重新加载触发 Hook
   - [js-reverse] list_console_messages → 读取 Hook 输出
-  
-  注意：Hook 注入后需要 reload，会刷新用户的真实页面，必要时提前告知用户
 ```
 
 #### 3.2 断点调试确认
@@ -300,10 +316,10 @@ Actions:
 ```
 Actions:
   - [js-reverse] set_breakpoint_on_text(text="关键代码片段")
-    → 断点直接设置在真实浏览器的 DevTools 中，用户可以在浏览器中看到断点标记
+    → 断点设置在调试浏览器中
   - 触发目标操作：
-    优先方式：在真实浏览器中直接操作（用户手动点击、或通过 chrome-devtools 的 click/fill 模拟）
-    确保触发的是真实用户行为产生的请求
+    通过 [js-reverse] evaluate_script 在调试浏览器中模拟点击/交互
+    或引导用户在调试浏览器中手动操作
   - [js-reverse] get_paused_info → 确认运行时变量值
   - [js-reverse] step_into / step_over → 单步跟踪执行流程
   
@@ -318,12 +334,9 @@ Actions:
 
 ```
 Actions:
-  - [chrome-devtools] evaluate_script → 在真实页面上触发多次数据请求
-    或引导用户在真实浏览器中手动执行翻页等操作
-  - [js-reverse] list_network_requests → 收集真实浏览器产生的网络请求
+  - [js-reverse] evaluate_script → 在调试浏览器中触发多次数据请求
+  - [js-reverse] list_network_requests → 收集调试浏览器产生的网络请求
   - 对比加密参数变化规律，确认变化因子
-  
-  优势：在真实浏览器中触发的请求，环境完全真实，不存在环境差异导致的误判
 ```
 
 ### Phase 4：Node.js 算法还原
@@ -497,19 +510,18 @@ MCP 操作：
 ### MCP 工具配合模式
 
 ```
-连接真实浏览器 → 静态定位 → 动态验证 → 补充分析 → 再次验证
-      ↓              ↓           ↓           ↓           ↓
-  list_pages     js-reverse  js-reverse  js-reverse  js-reverse
-  select_page    搜索源码    设置断点    扩展搜索    trace函数
-  (两个MCP都选中              获取变量    读取更多源码
-   同一真实页面)
+新建调试浏览器 → Cookie写入 → 静态定位 → 动态验证 → 补充分析 → 再次验证
+      ↓             ↓            ↓           ↓           ↓           ↓
+  new_page    evaluate_script  搜索源码    设置断点    扩展搜索    trace函数
+  (独立实例)   (写入Cookie      定位关键JS  获取变量    读取更多源码
+               刷新生效)
 
-所有操作均在用户已打开的真实 Chrome 页面上执行
+所有操作均在独立的调试浏览器中执行，不影响用户日常 Chrome
 ```
 
 ### 效率原则
 
-1. **先连接后操作**：任何分析前必须先 `list_pages` + `select_page` 连接真实浏览器
+1. **先建环境后操作**：任何分析前必须先通过 `new_page` 创建调试浏览器，需要登录态时先写入 Cookie
 2. **先 Network 后 Sources**：先确定数据接口和参数格式，再去源码中搜索
 3. **先验证 I/O 后反编译**：确认函数输入输出正确，不要通读混淆代码
 4. **先找骨架函数后读细节**：搜索关键词锁定入口，不要通读全部代码
@@ -519,9 +531,9 @@ MCP 操作：
 ### 调试方法论
 
 1. **六步定位法**：
-   - **连接真实浏览器** → `list_pages` + `select_page` 选中用户已打开的目标页面
-   - Network 面板 → 找数据接口和参数格式（真实浏览器产生的请求）
-   - `search_in_sources` → 搜索关键词定位源码（真实页面已加载的脚本）
+   - **搭建调试环境** → `new_page` 创建调试浏览器 + Cookie 写入（如需）
+   - Network 面板 → 找数据接口和参数格式（调试浏览器产生的请求）
+   - `search_in_sources` → 搜索关键词定位源码（调试页面已加载的脚本）
    - 定位入口函数 → `beforeSend`、`$.ajax`、`fetch`、`XMLHttpRequest.open`
    - 追踪调用链 → 从入口向上找参数生成逻辑
    - 验证算法 → 用已知输入输出验证还原结果
