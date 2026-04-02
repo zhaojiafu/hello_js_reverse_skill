@@ -19,9 +19,9 @@
 
 **MCP 辅助**：
 ```
-[js-reverse] search_in_sources(query="_0x") → 定位混淆入口
-[js-reverse] evaluate_script → 在浏览器中执行字符串数组还原
-[js-reverse] save_script_source → 保存到本地进一步分析
+[camoufox-reverse] search_code(keyword="_0x") → 定位混淆入口
+[camoufox-reverse] evaluate_js → 在浏览器中执行字符串数组还原
+[camoufox-reverse] save_script → 保存到本地进一步分析
 ```
 
 ### 2. 控制流平坦化 (CFF)
@@ -47,9 +47,9 @@ while (true) {
 
 **MCP 辅助**：
 ```
-[js-reverse] set_breakpoint_on_text(text="switch") → 在状态机入口断点
-[js-reverse] step_over → 逐步追踪状态转移
-[js-reverse] get_paused_info → 查看当前状态值
+[camoufox-reverse] set_breakpoint_via_hook(target_function="状态机入口函数") → 设置伪断点
+[camoufox-reverse] trace_function(function_path="状态机函数", log_args=true, log_return=true) → 追踪状态转移
+[camoufox-reverse] get_trace_data → 查看状态值变化
 ```
 
 ### 3. eval / Function 打包
@@ -68,8 +68,8 @@ new Function('return ' + decryptedCode)()
 
 **MCP 辅助**：
 ```
-[js-reverse] inject_before_load(script="eval/Function Hook")
-[js-reverse] list_console_messages → 读取解包后的代码
+[camoufox-reverse] add_init_script(script="eval/Function Hook")
+[camoufox-reverse] get_console_logs → 读取解包后的代码
 ```
 
 ### 4. AAEncode
@@ -118,9 +118,9 @@ $=~[];$={___:++$,$$$$:(![]+"")[$],...
 
 **MCP 辅助**：
 ```
-[js-reverse] trace_function(functionName="解释器函数")
-[js-reverse] set_breakpoint_on_text(text="switch") → 在解释器循环断点
-[js-reverse] step_over → 观察每步操作
+[camoufox-reverse] trace_function(function_path="解释器函数", log_args=true, log_return=true)
+[camoufox-reverse] get_trace_data → 观察每步操作的输入输出
+[camoufox-reverse] set_breakpoint_via_hook(target_function="解释器核心函数") → 捕获关键调用
 ```
 
 ### 8. JSVMP（JS 虚拟机保护）
@@ -139,9 +139,9 @@ $=~[];$={___:++$,$$$$:(![]+"")[$],...
 
 **MCP 辅助**：
 ```
-[js-reverse] break_on_xhr(url="目标接口") → 在请求发出时暂停
-[js-reverse] get_paused_info → 获取调用栈
-[js-reverse] inject_before_load → 注入全局 Hook
+[camoufox-reverse] inject_hook_preset(preset="xhr") → 一键 Hook XHR 请求
+[camoufox-reverse] get_request_initiator(request_id=N) → 获取请求的 JS 调用栈（黄金路径）
+[camoufox-reverse] add_init_script → 注入全局 Hook
 ```
 
 ## 通用反混淆 Node.js 工具
@@ -189,10 +189,10 @@ function deobfuscate(code) {
 ## 混淆代码分析的 MCP 工作流
 
 ```
-1. save_script_source → 保存混淆代码到本地
-2. search_in_sources → 搜索可能的入口函数
-3. set_breakpoint_on_text → 在入口设断点
-4. get_paused_info → 查看运行时变量，理解数据流
-5. evaluate_script → 在浏览器执行还原操作
-6. step_into → 跟进关键函数调用
+1. save_script → 保存混淆代码到本地
+2. search_code → 搜索可能的入口函数
+3. set_breakpoint_via_hook → 在入口设伪断点
+4. get_breakpoint_data → 查看捕获的参数和返回值
+5. evaluate_js → 在浏览器执行还原操作
+6. trace_function → 追踪关键函数调用链
 ```

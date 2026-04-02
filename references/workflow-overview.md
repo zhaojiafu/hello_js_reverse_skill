@@ -93,30 +93,30 @@
 - 加密逻辑过于复杂，还原成本远大于自动化
 
 **技术栈**：
-- `playwright` / `puppeteer` — 浏览器自动化
-- chrome-devtools MCP — 直接操作已有 Chrome
+- `playwright-core` — 浏览器自动化
+- `camoufox-reverse` MCP — Camoufox 反检测浏览器、Hook、网络捕获、源码搜索
 
 **注意事项**：
-- 复用本机 Chrome 实例避免指纹差异
-- 注入脚本截取中间数据
-- 控制请求频率避免触发风控
+- 优先使用 Camoufox 独立浏览器实例，避免污染用户日常浏览环境
+- 通过 `inject_hook_preset` / `add_init_script` 注入脚本截取中间数据
+- 控制请求频率并结合 `check_detection` 验证反检测效果
 
 **模板**：`templates/browser-auto/`
 
 ## 通用调试流程
 
 ```
-1. 打开 Network 面板
+1. 启动 Camoufox 并开启网络捕获
    ↓
 2. 触发目标操作（搜索/翻页/登录）
    ↓
 3. 找到数据接口，分析参数
    ↓
-4. 搜索参数名定位 JS 源码
+4. 用 `search_code` 搜索参数名定位 JS 源码
    ↓
-5. 设置 XHR 断点追踪调用栈
+5. 用 `get_request_initiator` / `set_breakpoint_via_hook` 追踪调用栈
    ↓
-6. 在关键函数设置断点
+6. 在关键函数设置伪断点或 `trace_function`
    ↓
 7. 单步调试确认加密逻辑
    ↓

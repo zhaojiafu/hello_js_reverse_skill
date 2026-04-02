@@ -27,9 +27,13 @@ setInterval(function() { debugger; }, 100);
 
 ### 绕过方案
 
-**方案 A：MCP 注入绕过**
+**方案 A：MCP 一键绕过**
 ```
-[js-reverse] inject_before_load(script=反debugger脚本)
+[camoufox-reverse] bypass_debugger_trap()
+或
+[camoufox-reverse] inject_hook_preset(preset="debugger_bypass")
+或手动注入：
+[camoufox-reverse] add_init_script(script=反debugger脚本)
 ```
 
 ```javascript
@@ -57,9 +61,9 @@ setInterval = function(fn, ms) {
 };
 ```
 
-**方案 B：断点条件设置 false**
+**方案 B：加载前拦截 debugger 构造**
 ```
-[js-reverse] set_breakpoint_on_text(text="debugger", condition="false")
+[camoufox-reverse] add_init_script(script=反debugger脚本)
 ```
 
 ## 2. 开发者工具检测
@@ -158,7 +162,7 @@ if (someFunction.toString().length !== 1234) {
 }
 ```
 
-**绕过**：不修改原始函数，使用 `inject_before_load` 在执行之前收集所需数据。
+**绕过**：不修改原始函数，使用 `add_init_script` 在页面脚本执行之前收集所需数据。
 
 ## 4. 时间差检测
 
@@ -284,7 +288,7 @@ try {
 
 ## 通用反反调试注入脚本
 
-以下脚本适合通过 `inject_before_load` 在页面加载前注入：
+以下脚本适合通过 `add_init_script` 在页面加载前注入：
 
 ```javascript
 (function() {

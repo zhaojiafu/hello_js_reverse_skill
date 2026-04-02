@@ -1,4 +1,4 @@
-# 常见加密模式识别与还原
+# 常见加密模式识别与还原（Node.js / Python 双语言）
 
 ## 快速识别表
 
@@ -20,10 +20,19 @@
 ### 标准 MD5
 
 ```javascript
+// Node.js
 const crypto = require('crypto');
 function md5(str) {
     return crypto.createHash('md5').update(str).digest('hex');
 }
+```
+
+```python
+# Python
+import hashlib
+
+def md5(text: str) -> str:
+    return hashlib.md5(text.encode('utf-8')).hexdigest()
 ```
 
 ### 自定义 MD5（非标准实现）
@@ -51,10 +60,20 @@ sign = md5(md5(password) + timestamp)
 ## 2. HMAC
 
 ```javascript
+// Node.js
 const crypto = require('crypto');
 function hmacSha256(message, secret) {
     return crypto.createHmac('sha256', secret).update(message).digest('hex');
 }
+```
+
+```python
+# Python
+import hmac
+import hashlib
+
+def hmac_sha256(message: str, secret: str) -> str:
+    return hmac.new(secret.encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
 ```
 
 **识别特征**：搜索 `HMAC`、`createHmac`、`CryptoJS.HmacSHA256`
@@ -64,6 +83,7 @@ function hmacSha256(message, secret) {
 ### AES-CBC
 
 ```javascript
+// Node.js
 const crypto = require('crypto');
 
 function aesEncrypt(plaintext, key, iv) {
@@ -83,9 +103,27 @@ function aesDecrypt(ciphertext, key, iv) {
 }
 ```
 
+```python
+# Python
+import base64
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
+
+def aes_cbc_encrypt(plaintext: str, key: str, iv: str) -> str:
+    cipher = AES.new(key.encode('utf-8'), AES.MODE_CBC, iv.encode('utf-8'))
+    padded = pad(plaintext.encode('utf-8'), AES.block_size)
+    return base64.b64encode(cipher.encrypt(padded)).decode('utf-8')
+
+def aes_cbc_decrypt(ciphertext_b64: str, key: str, iv: str) -> str:
+    cipher = AES.new(key.encode('utf-8'), AES.MODE_CBC, iv.encode('utf-8'))
+    decrypted = cipher.decrypt(base64.b64decode(ciphertext_b64))
+    return unpad(decrypted, AES.block_size).decode('utf-8')
+```
+
 ### AES-ECB
 
 ```javascript
+// Node.js
 function aesEcbEncrypt(plaintext, key) {
     const cipher = crypto.createCipheriv('aes-128-ecb', key, null);
     cipher.setAutoPadding(true);
@@ -93,6 +131,14 @@ function aesEcbEncrypt(plaintext, key) {
     encrypted += cipher.final('base64');
     return encrypted;
 }
+```
+
+```python
+# Python
+def aes_ecb_encrypt(plaintext: str, key: str) -> str:
+    cipher = AES.new(key.encode('utf-8'), AES.MODE_ECB)
+    padded = pad(plaintext.encode('utf-8'), AES.block_size)
+    return base64.b64encode(cipher.encrypt(padded)).decode('utf-8')
 ```
 
 ### CryptoJS 兼容
@@ -118,6 +164,7 @@ const encrypted = CryptoJS.AES.encrypt(plaintext, CryptoJS.enc.Utf8.parse(key), 
 ## 4. DES / 3DES
 
 ```javascript
+// Node.js
 function desEncrypt(plaintext, key) {
     const cipher = crypto.createCipheriv('des-ecb', key, null); // 8字节key
     cipher.setAutoPadding(true);
@@ -135,9 +182,26 @@ function tripleDesEncrypt(plaintext, key, iv) {
 }
 ```
 
+```python
+# Python
+from Crypto.Cipher import DES, DES3
+from Crypto.Util.Padding import pad
+
+def des_ecb_encrypt(plaintext: str, key: str) -> str:
+    cipher = DES.new(key.encode('utf-8'), DES.MODE_ECB)
+    padded = pad(plaintext.encode('utf-8'), DES.block_size)
+    return base64.b64encode(cipher.encrypt(padded)).decode('utf-8')
+
+def triple_des_cbc_encrypt(plaintext: str, key: str, iv: str) -> str:
+    cipher = DES3.new(key.encode('utf-8'), DES3.MODE_CBC, iv.encode('utf-8'))
+    padded = pad(plaintext.encode('utf-8'), DES3.block_size)
+    return base64.b64encode(cipher.encrypt(padded)).decode('utf-8')
+```
+
 ## 5. RSA
 
 ```javascript
+// Node.js
 const crypto = require('crypto');
 
 function rsaEncrypt(plaintext, publicKey) {
@@ -162,6 +226,27 @@ function rsaEncrypt(plaintext, publicKeyPem) {
 }
 ```
 
+```python
+# Python
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_v1_5
+
+def rsa_encrypt(plaintext: str, public_key_pem: str) -> str:
+    key = RSA.import_key(public_key_pem)
+    cipher = PKCS1_v1_5.new(key)
+    encrypted = cipher.encrypt(plaintext.encode('utf-8'))
+    return base64.b64encode(encrypted).decode('utf-8')
+
+# OAEP 模式
+from Crypto.Cipher import PKCS1_OAEP
+
+def rsa_encrypt_oaep(plaintext: str, public_key_pem: str) -> str:
+    key = RSA.import_key(public_key_pem)
+    cipher = PKCS1_OAEP.new(key)
+    encrypted = cipher.encrypt(plaintext.encode('utf-8'))
+    return base64.b64encode(encrypted).decode('utf-8')
+```
+
 **常见 RSA 公钥格式**：
 - PEM 格式（`-----BEGIN PUBLIC KEY-----`）
 - 模数(n) + 指数(e) 格式（需要手动构造 PEM）
@@ -169,7 +254,7 @@ function rsaEncrypt(plaintext, publicKeyPem) {
 ## 6. Base64 变体
 
 ```javascript
-// 标准 Base64
+// Node.js
 const encoded = Buffer.from(str).toString('base64');
 const decoded = Buffer.from(encoded, 'base64').toString();
 
@@ -190,9 +275,28 @@ function customBase64(str, table) {
 }
 ```
 
+```python
+# Python
+import base64
+
+encoded = base64.b64encode(text.encode('utf-8')).decode('utf-8')
+decoded = base64.b64decode(encoded).decode('utf-8')
+
+# Base64url（URL安全变体）
+encoded_url = base64.urlsafe_b64encode(text.encode('utf-8')).decode('utf-8').rstrip('=')
+
+# 自定义字符表 Base64
+def custom_base64(text: str, table: str) -> str:
+    std = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    b64 = base64.b64encode(text.encode('utf-8')).decode('utf-8')
+    trans = str.maketrans(std, table)
+    return b64.translate(trans)
+```
+
 ## 7. 异或加密（XOR）
 
 ```javascript
+// Node.js
 function xorEncrypt(plaintext, key) {
     const result = [];
     for (let i = 0; i < plaintext.length; i++) {
@@ -202,9 +306,20 @@ function xorEncrypt(plaintext, key) {
 }
 ```
 
+```python
+# Python
+def xor_encrypt(plaintext: str, key: str) -> str:
+    result = bytes([
+        ord(plaintext[i]) ^ ord(key[i % len(key)])
+        for i in range(len(plaintext))
+    ])
+    return result.hex()
+```
+
 ## 8. RC4
 
 ```javascript
+// Node.js
 function rc4(data, key) {
     const s = Array.from({ length: 256 }, (_, i) => i);
     let j = 0;
@@ -224,21 +339,53 @@ function rc4(data, key) {
 }
 ```
 
+```python
+# Python（使用 pycryptodome）
+from Crypto.Cipher import ARC4
+
+def rc4_encrypt(data: str, key: str) -> bytes:
+    cipher = ARC4.new(key.encode('utf-8'))
+    return cipher.encrypt(data.encode('utf-8'))
+
+# 或手动实现（与 JS 版本逻辑一致）
+def rc4_manual(data: str, key: str) -> bytes:
+    s = list(range(256))
+    j = 0
+    for i in range(256):
+        j = (j + s[i] + ord(key[i % len(key)])) % 256
+        s[i], s[j] = s[j], s[i]
+    i = j = 0
+    result = []
+    for char in data:
+        i = (i + 1) % 256
+        j = (j + s[i]) % 256
+        s[i], s[j] = s[j], s[i]
+        result.append(ord(char) ^ s[(s[i] + s[j]) % 256])
+    return bytes(result)
+```
+
 ## 9. 时间戳处理
 
 ```javascript
-// 毫秒级（13位）
-const tsMs = Date.now();         // 1710000000000
-
-// 秒级（10位）
-const tsSec = Math.floor(Date.now() / 1000); // 1710000000
-
-// 注意：某些网站使用服务端时间戳，需要从响应头或接口获取
+// Node.js
+const tsMs = Date.now();                      // 毫秒级（13位）
+const tsSec = Math.floor(Date.now() / 1000);  // 秒级（10位）
 ```
+
+```python
+# Python
+import time
+
+ts_ms = int(time.time() * 1000)  # 毫秒级（13位）
+ts_sec = int(time.time())        # 秒级（10位）
+```
+
+**注意**：某些网站使用服务端时间戳，需要从响应头或接口获取。
 
 ## 10. 参数签名常见拼接模式
 
 ```javascript
+// Node.js
 // 模式1：固定格式
 sign = md5(`page=${page}&t=${timestamp}&key=${secret}`)
 
@@ -252,4 +399,26 @@ sign = md5(JSON.stringify(data) + secret)
 
 // 模式4：管道分隔
 sign = md5(`${page}|${timestamp}|${secret}`)
+```
+
+```python
+# Python
+import hashlib, json, time
+
+def md5(text: str) -> str:
+    return hashlib.md5(text.encode('utf-8')).hexdigest()
+
+# 模式1：固定格式
+sign = md5(f"page={page}&t={timestamp}&key={secret}")
+
+# 模式2：所有参数排序拼接
+params = {"page": 1, "size": 10, "t": int(time.time())}
+param_str = "&".join(f"{k}={params[k]}" for k in sorted(params))
+sign = md5(param_str + secret)
+
+# 模式3：JSON 字符串（注意 separators 控制格式）
+sign = md5(json.dumps(data, separators=(',', ':'), sort_keys=True) + secret)
+
+# 模式4：管道分隔
+sign = md5(f"{page}|{timestamp}|{secret}")
 ```

@@ -387,12 +387,15 @@ function createFullBrowserEnv(options = {}) {
 ## MCP 辅助确定环境需求
 
 ```
-1. [js-reverse] search_in_sources(query="window.|document.|navigator.") 
-   → 识别代码访问了哪些浏览器 API
+1. [camoufox-reverse] search_code(keyword="window|document|navigator|location|screen")
+   → 先在已加载脚本中识别代码访问了哪些浏览器 API
 
-2. [js-reverse] evaluate_script(function="列出所有被访问的全局变量")
-   → 确定需要补全的范围
+2. [camoufox-reverse] add_init_script(script="记录被访问的全局变量和属性")
+   + reload()
+   + get_console_logs
+   → 确定运行时真正访问了哪些环境字段
 
-3. [js-reverse] set_breakpoint_on_text(text="typeof window") 
-   → 在环境检测处断点，确认检测逻辑
+3. [camoufox-reverse] set_breakpoint_via_hook(target_function="环境检测函数路径")
+   + get_breakpoint_data
+   → 在环境检测函数入口捕获入参、返回值和调用栈，确认需要补全的关键分支
 ```

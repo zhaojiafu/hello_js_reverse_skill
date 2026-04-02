@@ -15,11 +15,21 @@
 使用 MCP 工具捕获请求：
 
 ```
-[js-reverse] list_network_requests(resourceTypes=["XHR"])
+[camoufox-reverse] launch_browser()
+[camoufox-reverse] navigate(url="https://example.com/data")
+[camoufox-reverse] start_network_capture()
+
+→ 触发翻页交互
+[camoufox-reverse] click(selector=".next-page")
+
+[camoufox-reverse] list_network_requests
 → 发现数据接口: /api/v1/products
 
-[js-reverse] get_network_request(reqid=42)
+[camoufox-reverse] get_network_request(request_id=42)
 → 获取完整请求信息
+
+[camoufox-reverse] get_request_initiator(request_id=42)
+→ 直接定位签名函数 generateSign
 ```
 
 **请求详情**:
@@ -42,17 +52,17 @@ Headers:
 ### 搜索加密入口
 
 ```
-[js-reverse] search_in_sources(query="sign=")
+[camoufox-reverse] search_code(keyword="sign=")
 → 在 /static/js/app.js 第 1234 行找到: params.sign = generateSign(page, timestamp)
 
-[js-reverse] search_in_sources(query="generateSign")
+[camoufox-reverse] search_code(keyword="generateSign")
 → 在 /static/js/utils.js 第 567 行找到函数定义
 ```
 
 ### 读取关键代码
 
 ```
-[js-reverse] get_script_source(url="https://example.com/static/js/utils.js", startLine=560, endLine=590)
+[camoufox-reverse] get_script_source(script_url="https://example.com/static/js/utils.js")
 ```
 
 还原后的关键代码：
@@ -69,16 +79,18 @@ function generateSign(page, timestamp) {
 ### 注入 Hook 验证
 
 ```
-[js-reverse] inject_before_load(script="XHR Hook + generateSign Hook")
-[js-reverse] navigate_page(type="reload")
-[js-reverse] list_console_messages()
+[camoufox-reverse] inject_hook_preset(preset="xhr")
+[camoufox-reverse] set_breakpoint_via_hook(target_function="window.generateSign")
+[camoufox-reverse] reload()
+[camoufox-reverse] get_breakpoint_data
 ```
 
-Hook 输出：
+伪断点捕获：
 ```
-[Hook:Custom] generateSign 调用
-[Hook:Custom] 参数: [1, 1710000000]
-[Hook:Custom] 返回: "e10adc3949ba59abbe56e057f20f883e"
+target: window.generateSign
+arguments: [1, 1710000000]
+return_value: "e10adc3949ba59abbe56e057f20f883e"
+call_stack: [...]
 ```
 
 ### 验证 MD5
@@ -148,5 +160,6 @@ async function fetchPage(page) {
 1. Network 抓包分析
 2. JS 源码搜索定位
 3. MD5 签名还原
-4. XHR Hook 验证
-5. Node.js 纯算法模拟请求
+4. `get_request_initiator` 黄金路径定位
+5. `inject_hook_preset` + `set_breakpoint_via_hook` 动态验证
+6. Node.js 纯算法模拟请求

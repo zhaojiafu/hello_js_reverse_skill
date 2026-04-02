@@ -10,18 +10,17 @@ Hook 是 JS 逆向中最核心的技术之一。通过劫持/拦截 JS 原生函
 ### 通过 MCP 注入（推荐）
 
 ```
-[js-reverse] inject_before_load(script=HookScript)
+[camoufox-reverse] add_init_script(script=HookScript)
 → 在页面脚本加载前注入，确保 Hook 在目标代码之前生效
 
-[js-reverse] evaluate_script(function=HookScript)
+[camoufox-reverse] evaluate_js(expression=HookScript)
 → 在当前页面上下文执行，适合页面已加载后的动态注入
-```
 
-### 通过浏览器控制台注入
+[camoufox-reverse] inject_hook_preset(preset="xhr|fetch|crypto|websocket|debugger_bypass")
+→ 一键注入预设 Hook，覆盖常见逆向场景
 
-在 chrome-devtools MCP 中使用：
-```
-[chrome-devtools] evaluate_script(function=HookScript)
+[camoufox-reverse] hook_function(function_path="目标函数", hook_code="...", position="before|after|replace")
+→ 对指定函数注入自定义 Hook
 ```
 
 ## Hook 模板库
@@ -390,8 +389,10 @@ Hook 是 JS 逆向中最核心的技术之一。通过劫持/拦截 JS 原生函
 
 ## MCP 注入最佳实践
 
-1. **使用 `inject_before_load`**：确保 Hook 在目标代码之前生效
-2. **使用 `console.log` 输出**：通过 `list_console_messages` 收集结果
-3. **使用 `console.trace`**：在关键点输出调用栈
-4. **避免覆写原型链的 toString**：防止被反检测代码发现
-5. **使用 Proxy 代替直接覆写**：更隐蔽，不改变 `typeof` 结果
+1. **使用 `add_init_script`**：确保 Hook 在目标代码之前生效
+2. **优先使用 `inject_hook_preset`**：一键注入 xhr/fetch/crypto/websocket/debugger_bypass 预设 Hook
+3. **使用 `hook_function`**：对特定函数注入 before/after/replace Hook
+4. **使用 `console.log` 输出**：通过 `get_console_logs` 收集结果
+5. **使用 `console.trace`**：在关键点输出调用栈
+6. **Camoufox 优势**：Juggler 协议沙箱隔离，Hook 不会被页面 JS 检测到
+7. **使用 Proxy 代替直接覆写**：更隐蔽，不改变 `typeof` 结果

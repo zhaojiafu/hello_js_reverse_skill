@@ -27,11 +27,11 @@
 
 ### 解决方案
 
-#### 方案 A：使用浏览器自动化（最可靠）
+#### 方案 A：使用 Camoufox 反检测浏览器（最可靠）
 
 ```javascript
-// 使用 chrome-devtools MCP 在真实浏览器中执行请求
-// [chrome-devtools] evaluate_script
+// 使用 camoufox-reverse MCP 在 Camoufox 浏览器环境中执行请求
+// [camoufox-reverse] evaluate_js
 const response = await fetch('https://target.com/api/data', {
     method: 'GET',
     headers: { 'Cookie': cookieValue },
@@ -42,7 +42,9 @@ const data = await response.json();
 
 ```
 MCP 操作：
-[chrome-devtools] evaluate_script(function="fetch(url).then(r=>r.json()).then(d=>JSON.stringify(d))")
+[camoufox-reverse] launch_browser()
+[camoufox-reverse] navigate(url="https://target.com")
+[camoufox-reverse] evaluate_js(expression="fetch(url, options).then(r=>r.json()).then(d=>JSON.stringify(d))")
 ```
 
 #### 方案 B：curl-impersonate
@@ -157,10 +159,12 @@ const client = axios.create({
 });
 ```
 
-### MCP 模拟
+### MCP 侧验证
 
 ```
-[chrome-devtools] emulate(userAgent="自定义UA")
+[camoufox-reverse] launch_browser(os_type="macos")
+[camoufox-reverse] get_fingerprint_info
+→ 验证当前浏览器环境中的 UA、平台和指纹是否与目标站点要求一致
 ```
 
 ## 4. Referer 校验
