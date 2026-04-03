@@ -99,7 +99,7 @@ argument-hint: "<目标URL> [需要分析的加密参数名, 如 sign, m, token]
 
 ## 核心武器：camoufox-reverse MCP
 
-Camoufox 反检测浏览器 + Playwright 协议，C++ 引擎级指纹伪装，52 个工具覆盖逆向分析全链路。
+Camoufox 反检测浏览器 + Playwright 协议，C++ 引擎级指纹伪装，57 个工具覆盖逆向分析全链路。
 
 **核心优势：**
 - Camoufox 在 **C++ 引擎层** 修改指纹信息，而非 JS 补丁
@@ -110,14 +110,16 @@ Camoufox 反检测浏览器 + Playwright 协议，C++ 引擎级指纹伪装，52
 
 ### 浏览器与页面控制
 
-- `launch_browser`：启动 Camoufox 反检测浏览器（可配置 headless/proxy/os_type/humanize/block_images/block_webrtc）
+- `launch_browser`：启动 Camoufox 反检测浏览器（可配置 headless/proxy/os_type/humanize/block_images/block_webrtc）。**已启动时返回完整会话状态**（页面 URL、上下文列表、抓包状态），不再只返回 `already_running`
 - `close_browser`：关闭浏览器释放资源
 - `navigate`：导航到目标 URL（支持 wait_until: load/domcontentloaded/networkidle）
 - `reload` / `go_back`：刷新 / 后退
 - `click` / `type_text`：点击元素 / 输入文本
 - `wait_for`：等待元素或 URL 匹配
-- `get_page_info`：获取当前页面信息
-- `take_screenshot` / `take_snapshot`：截图 / 获取无障碍树
+- `get_page_info`：获取当前页面 URL、标题、视口尺寸
+- `take_screenshot` / `take_snapshot`：截图 / 获取页面无障碍树（兼容新版 Playwright >= 1.42，自动 fallback 到 JS 实现）
+- `get_page_content`：**一键导出渲染后 HTML + title + meta + 可见文本**（前 50KB HTML + 前 20KB 可见文本）
+- `get_session_info`：**查看当前会话状态**（浏览器/上下文/页面/抓包状态/持久化脚本/Hook 列表），用于了解当前调试环境全貌
 
 ### 源码分析（逆向核心）
 
@@ -145,7 +147,7 @@ Camoufox 反检测浏览器 + Playwright 协议，C++ 引擎级指纹伪装，52
 - `inject_hook_preset`：一键预设 Hook（xhr/fetch/crypto/websocket/debugger_bypass，**默认 persistent=True 持久化**）
 - `remove_hooks`：移除所有 Hook（支持 `keep_persistent` 参数保留持久化 Hook）
 - `freeze_prototype`：**冻结任意原型方法**（`Object.defineProperty` configurable:false + writable:false，防止页面 JS 覆盖 Hook）
-- `trace_property_access`：**Proxy 级别属性访问追踪**（监控对象属性的读写操作）
+- `trace_property_access`：**Proxy 级别属性访问追踪**（监控对象属性的读写操作，使用 `.*` 后缀监控全部属性，如 `navigator.*`、`screen.*`）
 - `get_property_access_log`：获取属性访问记录
 
 ### JSVMP 专项分析
@@ -158,11 +160,14 @@ Camoufox 反检测浏览器 + Playwright 协议，C++ 引擎级指纹伪装，52
 ### 网络分析（逆向核心）
 
 - `start_network_capture` / `stop_network_capture`：启停网络流量捕获（支持 **`capture_body=True` 捕获响应体**，大响应自动截断 200KB）
-- `list_network_requests`：列出捕获的请求（支持过滤）
-- `get_network_request`：获取请求完整详情（含响应体）
+- `list_network_requests`：列出捕获的请求（支持过滤，URL 截断到 200 字符，字段精简：`resource_type` → `type`，`duration` → `ms`）
+- `get_network_request`：获取请求完整详情（含响应体，**支持 `include_headers=False` 省略 headers 节约 token**）
 - `get_request_initiator`：**获取发起请求的 JS 调用栈**（改进 URL 匹配 + 反向搜索 + 诊断信息，黄金路径：从请求直接定位签名函数）
 - `intercept_request`：拦截请求（log/block/modify/mock 四种模式）
 - `stop_intercept`：停止拦截
+- `search_response_body`：**在所有已捕获响应体中全文搜索关键词**（需先 `start_network_capture(capture_body=True)`，支持 `url_filter` 缩小范围）
+- `get_response_body_page`：**分页读取大响应体**（避免截断丢失数据，`offset` + `length` 分页，单次最大 50KB）
+- `search_json_path`：**按 JSON 路径提取响应数据**（支持 `data.token`、`result[0].sign`、`data[*].id` 通配提取）
 
 ### 存储管理
 
@@ -195,14 +200,14 @@ Camoufox 反检测浏览器 + Playwright 协议，C++ 引擎级指纹伪装，52
 ┌─ 用户提供了 Cookie？
 │
 ├─ YES → 路径 A：带 Cookie 启动
-│   步骤 1: launch_browser() → 启动反检测浏览器
+│   步骤 1: launch_browser(headless=false) → 启动反检测浏览器（有头模式，方便用户观察）
 │   步骤 2: navigate(url="目标URL") → 导航到目标页面
 │   步骤 3: set_cookies(cookies=[...]) → 写入 Cookie
 │   步骤 4: reload() → 刷新使 Cookie 生效
 │   步骤 5: evaluate_js(expression="document.cookie") → 验证写入成功
 │
 └─ NO → 路径 B：直接启动
-    步骤 1: launch_browser() → 启动反检测浏览器
+    步骤 1: launch_browser(headless=false) → 启动反检测浏览器（有头模式，方便用户观察）
     步骤 2: navigate(url="目标URL") → 导航到目标页面
     步骤 3: 直接进入后续分析阶段
 ```
@@ -227,14 +232,16 @@ Camoufox 反检测浏览器 + Playwright 协议，C++ 引擎级指纹伪装，52
 ### 关键规则
 
 1. **不接管用户浏览器**：始终通过 `launch_browser` 创建独立 Camoufox 实例，用户的日常浏览器不受影响
-2. **有 Cookie 就写，没有就直接开干**：不要因为没有 Cookie 就阻塞流程，非登录态接口不需要 Cookie
-3. **单页面模式**：启动后所有操作在当前页面上下文中执行，通过 `navigate` 切换页面
-4. 如果分析过程中发现需要登录态但没有 Cookie，再引导用户获取：
+2. **必须有头模式启动**：`launch_browser` 调用时**必须显式传 `headless=false`**（有头模式），让用户可以观察页面行为、操作状态和调试过程。**禁止使用无头模式（headless=true）**，除非用户明确要求
+3. **有 Cookie 就写，没有就直接开干**：不要因为没有 Cookie 就阻塞流程，非登录态接口不需要 Cookie
+4. **单页面模式**：启动后所有操作在当前页面上下文中执行，通过 `navigate` 切换页面
+5. 如果分析过程中发现需要登录态但没有 Cookie，再引导用户获取：
    - DevTools 控制台：F12 → Console → `document.cookie` → 复制
    - Network 面板：F12 → Network → 任意请求 → 复制 Cookie Header
    - 浏览器扩展：EditThisCookie 等导出 JSON
-5. 如果 Cookie 过期或失效，提示用户重新获取并写入
-6. **状态持久化**：可通过 `export_state` 保存当前浏览器状态，下次通过 `import_state` 恢复，避免重复登录
+6. 如果 Cookie 过期或失效，提示用户重新获取并写入
+7. **状态持久化**：可通过 `export_state` 保存当前浏览器状态，下次通过 `import_state` 恢复，避免重复登录
+8. **善用会话查询**：不确定当前调试环境状态时，用 `get_session_info` 查看浏览器/页面/Hook/抓包全貌
 
 ## 工作流程
 
