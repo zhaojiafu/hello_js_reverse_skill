@@ -90,6 +90,13 @@ __mcp_tap_call(fn, null, [args[0], args[1], ...], 'vmp1');
   - 需要 `hot_methods` / `hot_functions` 数据（只有 AST 模式会生成）
 - **失败回退**：AST 解析失败时（例如脚本有语法错误或 Acorn 版本不支持的语法），`instrument_jsvmp_source` 会自动 pass-through 源码不变，并在 console 记 warn
 
+> **v0.5.0 变化**：`mode="ast"` 的实现从 v0.4.x 的"页面内加载 acorn CDN"改为
+> **MCP 侧 esprima-python 解析**。这意味着：
+> - 挑战页（瑞数 412、Akamai sensor_data 挑战等）上 AST 模式**能用了**（旧实现因 CDN 被挑战拦住会静默失败）
+> - 零 JS 依赖，`instrument_jsvmp_source` 的 AST 模式现在**应成为默认选择**
+> - 新增 `fallback_on_error=True`，esprima 解析失败时自动回落 regex
+> - 旧的 "ast_page" 模式保留但标注为 deprecated，仅做 A/B 对比用
+
 ### 2.3 选择建议
 
 | 情况 | 选 | 原因 |
@@ -99,6 +106,27 @@ __mcp_tap_call(fn, null, [args[0], args[1], ...], 'vmp1');
 | VMP 文件 > 5 MB | regex | AST 改写内存开销大 |
 | 关心 VMP 调了哪些方法 | **AST** | regex 不生成 tap_method / tap_call |
 | 关心 VMP 读了哪些属性 | 任一 | 两种模式都生成 tap_get |
+
+---
+
+## AST 模式健康诊断（v2.6.0 新增）
+
+启用 `instrument_jsvmp_source(mode="ast")` 后，通过 `get_instrumentation_status()` 的 `active_patterns[i].last_mode_used` 字段判断实际走了哪条路径：
+
+| `last_mode_used` | 含义 | 动作 |
+|---|---|---|
+| `"ast"` | MCP 侧 esprima 成功，全量 AST 改写 | 正常，继续 |
+| `"regex"` | 你显式指定了 `mode="regex"` | 正常，继续 |
+| `"regex (fallback)"` | `mode="ast"` 但 esprima 解析失败，自动回落 regex | **警告**：看下文 |
+| `"ast_page"` | 走的是 deprecated 的页面内 Acorn 实现 | 迁到 `"ast"`，除非你在做 A/B |
+
+`"regex (fallback)"` 持续出现时：
+
+1. 先 `get_console_logs` 里搜 `[INSTRUMENT] AST parse failed`，看具体报错
+2. 如果是 ES2022+ 的 private field / static block / top-level await 等新语法 → 手动 `mode="regex"`（~80% 覆盖）或 `mode="transparent"`（runtime 观察）兜底
+3. 如果是 `SyntaxError: Unexpected token` 开头 → 可能 JS 被加了 BOM 或非标准前缀，可以本地用 `curl` 下来手动检查首 100 字节
+
+一般来说，瑞数 sdenv*.js / Akamai acmescripts*.js / webmssdk 都能被 esprima 解析。如果出现持续 fallback，报告给 MCP 仓库 issue 区。
 
 ---
 

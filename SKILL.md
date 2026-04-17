@@ -4,10 +4,13 @@ description: >
   Node.js / Python 接口自动化与签名还原工程技能：对自有平台或已授权平台的 Web API 进行签名分析与接口对接，
   通过 Camoufox 反检测浏览器动态调试与静态源码分析，定位并还原前端加密/签名逻辑，
   使用 Node.js 或 Python 实现算法复现与自动化接口调用。
-  深度集成 camoufox-reverse MCP（C++ 引擎级指纹伪装，65 个逆向分析工具，v0.4.0+）。
+  深度集成 camoufox-reverse MCP v0.5.0（C++ 引擎级指纹伪装，65 个逆向分析工具，签名型反爬兼容改造）。
   擅长 JSVMP 虚拟机保护的双路径攻克：路径 A 算法追踪（Hook / 插桩 / 日志分析 / 源码级插桩四板斧，
   通用对瑞数 5/6、Akamai sensor_data、webmssdk、obfuscator.io）、
   路径 B 环境伪装（jsdom/vm 沙箱 + 浏览器环境采集对比 + 全量补丁）。
+  v2.6.0 新增反爬类型三分法（签名型/行为型/纯混淆）作为顶层决策框架，明确
+  pre_inject_hooks 与 hook_jsvmp_interpreter(mode="proxy") 对签名型反爬不可用，
+  引入 mode="transparent" 签名安全备选与 MCP 侧 AST 源码插桩（消除 CDN 依赖）。
 argument-hint: "<目标URL> [需要分析的加密参数名, 如 sign, m, token]"
 ---
 
@@ -98,6 +101,97 @@ argument-hint: "<目标URL> [需要分析的加密参数名, 如 sign, m, token]
 - **浏览器动态调试**：通过 camoufox-reverse MCP 启动 Camoufox 反检测浏览器（C++ 引擎级指纹伪装），在页面上设置伪断点、注入 Hook、追踪调用栈，获取运行时变量和加密中间值，不干扰用户日常浏览器。
 - **JSVMP 双路径攻克**：面对 JS 虚拟机保护（JSVMP），根据场景选择最优路径——路径 A「算法追踪」通过 Hook/插桩/日志三板斧从行为层面追踪签名链路；路径 B「环境伪装」在 jsdom/vm 沙箱中运行原始 JSVMP 字节码，通过浏览器环境采集→对比→补丁使 JSVMP 认为自己运行在真实浏览器中。
 
+---
+
+## 反爬类型识别与工具选择（v2.6.0 新增 · 顶层决策层）
+
+> **必读**：不同反爬类型必须用**完全不同的工具路径**。用错路径会导致挑战永远过不去
+> （表现为 `navigate` 返回的 `redirect_chain` 反复 412，`final_status` 长期等于 412 或
+> 和 `initial_status` 相同）。在进入 Phase 0.5 指纹采集之前，必须先完成反爬类型的初步识别。
+
+### 三分法总览
+
+| 类型 | 代表 | 特征 | ✅ 工具路径 | ❌ 禁用 |
+|---|---|---|---|---|
+| **签名型**<br>（环境即签名） | 瑞数 5/6、Akamai sensor_data v3+、Shape Security | 挑战时读 navigator/screen/document.cookie 等，hash 成 cookie；**任何主动观察都破坏签名** | `instrument_jsvmp_source(mode="ast")` +<br>`analyze_cookie_sources()` +<br>`navigate` 的 `redirect_chain`/`final_status` +<br>`reload_with_hooks()` +<br>（备选）`hook_jsvmp_interpreter(mode="transparent")` | `pre_inject_hooks=["jsvmp_probe"]`<br>`hook_jsvmp_interpreter(mode="proxy")`<br>`trace_property_access(["navigator.*"])` |
+| **行为型**<br>（参数签名） | TikTok webmssdk、极验 gt4、头条 a_bogus | 签名依赖参数/时间戳/用户行为，**不校验浏览器原生性** | `hook_jsvmp_interpreter(mode="proxy")` 全量开 +<br>`pre_inject_hooks=["jsvmp_probe"]` +<br>`inject_hook_preset("xhr"/"fetch"/"crypto")` +<br>（必要时）`instrument_jsvmp_source` 源码级补刀 | — |
+| **纯混淆** | obfuscator.io、自研 VMP 无反指纹 | 只是代码难读，不检测观察者 | 任意组合，优先 `instrument_jsvmp_source(mode="regex")` | — |
+
+### 识别反爬类型的标准动作（放在 Phase 0.5 之前）
+
+**第一步：不加任何 hook 直接 `navigate`**。这一步只为看响应链，不做任何观察。
+
+```js
+const r = await navigate(url)  // 不传 pre_inject_hooks,不加任何 hook
+```
+
+读四个关键字段：
+- `r.initial_status` — 首个响应的 HTTP 状态码
+- `r.final_status` — 主 frame 最后的响应码（经 JS 跳转后）
+- `r.redirect_chain` — 完整响应链 `[{url, status, ts, resource_type}]`
+- `r.url` / `r.title` — 最终落地页
+
+**第二步：按下表判断**：
+
+| 观察到 | 判断 |
+|---|---|
+| `redirect_chain` 里有**重复同 URL 的 412/302** 然后才 200 | 签名型（十有八九是瑞数/Akamai） |
+| `initial_status == 200` 直接返回，但 Network 里加载了 `sdenv*.js` / `FuckCookie*.js` | 签名型（瑞数） |
+| 加载 `acmescripts*.js` / `/akam/{version}/*` | 签名型（Akamai） |
+| 加载 `webmssdk.es5*.js` / `_sdkGlueInit` | 行为型（TikTok 系） |
+| 加载 `gt4*.js` + 滑块/点击验证 | 行为型（极验） |
+| `initial_status == 200` + JS 大文件含 `_0x` 前缀密集的变量 | 纯混淆（obfuscator.io） |
+| `initial_status == 200` + JS 大文件含 `while(true)`+`switch` 分发表 | JSVMP（需进一步判断是签名型还是行为型） |
+
+**第三步：如果是 JSVMP 但类型还不确定**，再做一次带 `pre_inject_hooks` 的对照实验：
+
+```js
+const r2 = await navigate(url, { pre_inject_hooks: ["jsvmp_probe"] })
+```
+
+- 如果 `r2.final_status == 412` 且 `redirect_chain` 反复 412，而 `r.final_status == 200`（第一次成功）→ **签名型**。立即移除所有 pre_inject_hooks，改走源码级插桩
+- 如果 `r2.final_status == 200` 正常拿到页面 → 行为型或纯混淆，可以继续用 runtime hook
+
+### 三类反爬对应的标准工作流简述
+
+> 详细步骤分别见下文 Phase 2.2+ 的"四板斧"说明和 `cases/` 经验库。这里只列路径大纲。
+
+**签名型工作流**（瑞数 / Akamai）：
+```
+1. navigate(url) 不加任何 hook → 观察 redirect_chain 确认
+2. analyze_cookie_sources() → 归因 cookie 来源(Set-Cookie vs document.cookie)
+3. find_dispatch_loops(script_url) → 确认是 JSVMP
+4. instrument_jsvmp_source("**/sdenv-*.js", mode="ast", tag="sdenv")
+5. reload_with_hooks() → 清空日志重跑挑战
+6. get_instrumentation_log(tag_filter="sdenv", type_filter="tap_get")
+   → 看 hot_keys 反推 VMP 读了哪些环境属性
+7. 在 Node/jsdom/Python 侧复刻最小环境，独立跑签名
+```
+
+**行为型工作流**（TikTok / 极验）：
+```
+1. launch_browser(headless=false) + start_network_capture(capture_body=True)
+2. navigate(url, pre_inject_hooks=["jsvmp_probe","xhr","fetch","crypto"])
+3. 用户完成挑战动作(滑块/验证码)
+4. get_jsvmp_log() + get_trace_data("XMLHttpRequest.prototype.send")
+5. 按场景 1(参数签名) / 场景 10(JSVMP+环境伪装) 继续
+```
+
+**纯混淆工作流**：
+```
+1. dump_jsvmp_strings(script_url)
+2. instrument_jsvmp_source(pattern, mode="regex")
+3. 按场景 4(OB 混淆) 还原
+```
+
+### 三条反模式警告
+
+1. **不要把 `pre_inject_hooks` 当瑞数的解法**。症状：`redirect_chain` 反复 412，挑战永远不过。这是观察者效应的标志，立即切换 `instrument_jsvmp_source`
+2. **不要在签名型反爬上默认开 `hook_jsvmp_interpreter`**。它的 `mode="proxy"`（默认值）会挂。如果一定要用，改 `mode="transparent"`，但仍不如源码级插桩稳
+3. **不要用 `trace_property_access(["navigator.*"])` 分析签名型反爬**。内部走 Proxy 或 getter 替换，签名型反爬一样能感知
+
+---
+
 ## 核心武器：camoufox-reverse MCP
 
 Camoufox 反检测浏览器 + Playwright 协议，C++ 引擎级指纹伪装，65 个工具覆盖逆向分析全链路（v0.4.0+）。
@@ -108,6 +202,7 @@ Camoufox 反检测浏览器 + Playwright 协议，C++ 引擎级指纹伪装，65
 - BrowserForge 基于 **真实流量分布** 生成指纹
 - 适用于有强反爬检测的站点：瑞数、极验、Cloudflare 等
 - Hook 持久化 + 防覆盖：跨导航自动重注入，`Object.defineProperty` 冻结防止页面 JS 覆盖
+- v0.5.0 签名型反爬兼容：hook_jsvmp_interpreter 新增 mode="transparent" 模式（仅 prototype getter 替换，不装 Proxy、不改 Function.prototype，对签名型反爬透明）；instrument_jsvmp_source 的 AST 模式改为 MCP 侧 esprima-python 实现，挑战页也能跑（不再依赖外部 CDN 加载 acorn）
 
 ### 浏览器与页面控制
 
@@ -117,6 +212,7 @@ Camoufox 反检测浏览器 + Playwright 协议，C++ 引擎级指纹伪装，65
   - `pre_inject_hooks=["xhr", "fetch", "crypto", "websocket", "debugger_bypass", "cookie_hook", "runtime_probe", "jsvmp_probe"]`——先走 `about:blank` 把 hook 装好，再 goto 目标 URL，保证 hook 在首屏 JS 之前生效（对瑞数 412 挑战页、Akamai 首包检测至关重要）
   - `via_blank=True`——不装新 hook 也强制经 about:blank，让之前注册的 persistent scripts 一定生效
   - 返回 `initial_status` / `final_status` / `redirect_chain`，解决"412 挑战页 → 通过后 200"的状态歧义
+  - ⚠️ **对签名型反爬（瑞数 5/6、Akamai sensor_data v3+）不可用**：pre-inject 的 probe 会改变 VMP 眼里的环境（Proxy 包装 navigator/screen、Function.prototype.apply/call 被覆盖），参与 cookie 计算的环境指纹失真，导致服务端验签失败。**症状**：`navigate` 永远不返回或返回时 `final_status == 412`，`redirect_chain` 里同一 URL 反复出现 412 响应，没有 200。**自救**：立即从 `pre_inject_hooks` 移除 `jsvmp_probe` / `cookie_hook` 等主动观察 probe，改用 `instrument_jsvmp_source(mode="ast")` 做源码级插桩。如果一定要 runtime 观察，退而求其次用 `pre_inject_hooks=["jsvmp_probe_transparent"]`（对应 mode="transparent"），但仍不如源码插桩稳。
 - `reload` / `go_back`：刷新 / 后退
 - `reload_with_hooks`：**[v0.4.0 新]** 重载当前页面，使 persistent hooks 在页面 JS 之前执行。默认 `clear_log=True` 会清空 `__mcp_jsvmp_log` / `__mcp_prop_access_log` / `__mcp_cookie_log`，获得干净的一次执行捕获。**典型用法**：先 navigate 到目标页定位 VMP 脚本 URL，再 `instrument_jsvmp_source` / `hook_jsvmp_interpreter`，最后 `reload_with_hooks()` 让探针先于 VMP 生效
 - `click` / `type_text`：点击元素 / 输入文本
@@ -169,6 +265,11 @@ Camoufox 反检测浏览器 + Playwright 协议，C++ 引擎级指纹伪装，65
   - `track_props=True`：在全局对象上装 Proxy——默认 `["navigator","screen","history","localStorage","sessionStorage","performance"]`（`document` **默认不装** 因为容易破坏页面；document.cookie 用 `cookie` 预设）
   - 参数 `script_url` 做栈过滤（传 VMP 文件 basename），`max_entries=10000`
   - **对瑞数 5/6、Akamai sensor_data v2/v3、TikTok webmssdk、obfuscator.io 通用有效**
+- `hook_jsvmp_interpreter` 新增 `mode` 参数（v0.5.0）：
+  - `mode="proxy"`（默认，向后兼容）— v0.4.x 的原行为，装 Proxy + 改 Function.prototype。**对签名型反爬会挂**（Proxy 和 Function.prototype.apply.toString 都可被检测）
+  - `mode="transparent"`（v0.5.0 新增，**签名安全备选**）— 只在 Navigator/Screen/Document/History/Performance/Location 原型上替换 getter，不装 Proxy、不改 Function.prototype。fake getter 的 `toString()` 伪装为原 getter 的源码串，瞒过 `Function.prototype.toString.call(getter)` 检测
+  - 选 mode 的决策：先做反爬类型识别。**签名型优先用 `instrument_jsvmp_source`**，transparent 作为源码插桩失败时的备选；**行为型/纯混淆**用默认 proxy 模式
+  - 对应 `pre_inject_hooks` 也增加了新名字 `"jsvmp_probe_transparent"`，语义等同
 - `get_jsvmp_log`：获取探针日志，支持 `type_filter`（"api_call"/"prop_read"）、`property_filter`、`func_filter`。返回自带 `summary.api_calls` / `summary.property_reads`（按调用次数倒排）
 - `dump_jsvmp_strings`：**v0.4.0 修复**——用手动括号匹配替代嵌套正则，不再死循环。返回 `string_arrays`（大数组） / `decoded_strings`（去重后 top 500） / `api_names`（命中 navigator/screen/encrypt/md5 等关键词的串） / `suspicious_patterns`（JSVMP 循环、eval、new Function、XOR 解密、Base64+fromCharCode 解码器）
 - `find_dispatch_loops`：**[v0.4.0 新]** 扫描脚本定位字节码分发函数。遍历每个 `switch(…)`，配对 `{…}` 做手动括号匹配，统计 case 数，返回 `case_count >= min_case_count（默认 20）` 的候选。输出 `{fn_name, case_count, char_range, preview}`——`case_count > 50` 基本可以确认是 VMP 解释器
@@ -182,6 +283,11 @@ Camoufox 反检测浏览器 + Playwright 协议，C++ 引擎级指纹伪装，65
   - `url_pattern` 用 glob（如 `"**/webmssdk.es5.js"`、`"**/sdenv-*.js"`、`"https://target.com/FuckCookie_*.js"`）
   - `tag` 作为过滤键（一次插桩多个 VMP 时区分）
   - **与 runtime 探针互补**：runtime 探针只看 VMP 路由到可 hook API 的部分；源码插桩能看到 VMP 在 switch/case 内部每一次 `opcode_table[code]` 访问和每一次子 handler 调用，是瑞数 6 / Akamai 这类"VM 完全自包含"场景的唯一有效手段
+- v0.5.0 变化（v2.6.0 吸收）：
+  - `mode="ast"`（默认）从 v0.4.x 的"页面内加载 acorn CDN"改为 **MCP 侧 esprima-python 解析**。这解决了挑战页（瑞数 412 等）加载不到 CDN 导致 AST 模式静默失败的问题
+  - 新增 `fallback_on_error=True`（默认 True）：esprima 解析失败时（极少，主要是 ES2022+ private field 等新语法）自动回落 regex
+  - `mode="ast_page"`（新增取值）：保留 v0.4.x 的旧行为（页面内 acorn CDN），仅用于 A/B 对比，标记为 **deprecated**，生产中**不要**选用
+  - `get_instrumentation_status()` 每个 `active_patterns` 现在包含 `last_mode_used` 字段，取值 `"ast"` / `"regex"` / `"regex (fallback)"` / `"ast_page"`。**长期是 `"regex (fallback)"` 说明 esprima 吃不下目标语法**，可 file issue
 - `get_instrumentation_log(tag_filter, type_filter, key_filter, limit=500, clear=False)`：**[v0.4.0 新]** 拉取源码插桩日志。`type_filter` 可选 `"tap_get"` / `"tap_call"` / `"tap_method"` / `"tap_call_err"`。返回内置 `summary`：
   - `hot_keys`：访问频次 top 30 的属性名——**指纹学习的金矿**，瑞数 VMP 会在这里暴露所有它读取的环境属性
   - `hot_methods`：调用频次 top 30 的方法（格式 `ObjectType.methodName`）
@@ -512,6 +618,27 @@ Actions:
 | **A：算法追踪** | 搞清 JSVMP 内部算法，用纯代码还原 | 三板斧（Hook/插桩/日志） | JSVMP 算法可提取、环境依赖少、使用标准加密算法 | 4-8 小时 |
 | **B：环境伪装** | 在 jsdom/vm 中运行原始 JSVMP | 环境采集 → 对比 → 补丁 | JSVMP 与环境深度绑定、算法不可提取、签名是「黑箱」 | 2-4 小时 |
 
+**路径 A 的前置判断（v2.6.0 新增）**：
+
+```
+先判断 JSVMP 所在反爬类型：
+
+┌─ navigate(url) 不加任何 hook，看 redirect_chain
+│
+├─ redirect_chain 反复 412 然后才到 200
+│   → 签名型 JSVMP
+│   → 路径 A **只能走第四板斧**（instrument_jsvmp_source, mode="ast"）
+│   → 前三板斧禁用（会破坏签名）
+│   → 若源码插桩失败再退 hook_jsvmp_interpreter(mode="transparent")
+│
+├─ redirect_chain 直接 200 但页面后续 XHR 带签名参数
+│   → 行为型 JSVMP
+│   → 路径 A 四板斧全开，按原三板斧流程走
+│
+└─ redirect_chain 直接 200 无特殊签名参数
+    → 不是签名型也不是 JSVMP，走 Phase 2.2 混淆还原
+```
+
 ```
 决策树：
   ├─ JSVMP 是否劫持了请求链路（XHR/fetch 拦截器）？
@@ -554,12 +681,12 @@ Actions:
 
 **四板斧适用边界与局限**：
 
-| 板斧 | 工具 | 擅长 | 不擅长 |
-|------|------|------|-------|
-| 第一斧（Hook I/O） | `inject_hook_preset(xhr/fetch/crypto/cookie)` + `freeze_prototype` | 请求链路劫持、动态 Cookie、加密原语入口 | VM 内部自实现的 MD5/AES |
-| 第二斧（插桩解释器） | `trace_function` + `trace_property_access` | 能识别分发函数名时的调用链追踪 | 匿名 IIFE 包裹 + 高频日志爆炸 |
-| 第三斧（日志分析） | `get_jsvmp_log` + 反向追踪 | 已能捕获签名值 I/O 时反推公式 | 签名完全不出 VM 的黑箱模式 |
-| 第四斧（**源码级插桩**） | `instrument_jsvmp_source` + `get_instrumentation_log` | VM 内部调度、"全部在 opcode dispatch 循环里发生"的场景，`hot_keys` 直接暴露环境指纹集 | 极限大文件（5MB+）regex 模式覆盖率下降；AST 模式需 CDN |
+| 板斧 | 工具 | 擅长 | 不擅长 | 适用反爬类型 |
+|------|------|------|-------|-------------|
+| 第一斧（Hook I/O） | `inject_hook_preset(xhr/fetch/crypto/cookie)` + `freeze_prototype` | 请求链路劫持、动态 Cookie、加密原语入口 | VM 内部自实现的 MD5/AES | 行为型 ✅ / 纯混淆 ✅ / 签名型 ❌ |
+| 第二斧（插桩解释器） | `trace_function` + `trace_property_access` | 能识别分发函数名时的调用链追踪 | 匿名 IIFE 包裹 + 高频日志爆炸 | 行为型 ✅ / 纯混淆 ✅ / 签名型 ❌ |
+| 第三斧（日志分析） | `get_jsvmp_log` + 反向追踪 | 已能捕获签名值 I/O 时反推公式 | 签名完全不出 VM 的黑箱模式 | 所有类型 ✅（纯被动分析，无副作用） |
+| 第四斧（**源码级插桩**） | `instrument_jsvmp_source` + `get_instrumentation_log` | VM 内部调度、"全部在 opcode dispatch 循环里发生"的场景，`hot_keys` 直接暴露环境指纹集 | 极限大文件（5MB+）regex 模式覆盖率下降；AST 模式需 CDN | 所有类型 ✅，**签名型首选** |
 
 - `hook_jsvmp_interpreter` **v0.4.0 重写后**覆盖 apply/call/bind + Reflect.*/Proxy 全局对象 + timing/random，适用面从"只对 apply 型 VMP"扩展到"绝大多数 VMP"，但仍看不到 VMP 在 switch/case 内 obj[key] 访问
 - `dump_jsvmp_strings` 前提是字符串未被动态解密，很多 VMP 的字符串表本身也是加密的（看到 `results.decoded_strings` 里全是单字母乱码就是这种情况）
@@ -567,6 +694,7 @@ Actions:
 - `trace_function` 对高频调用函数（每秒数千次）日志量可能爆炸，必须设置 `max_captures` 限制
 - `get_trace_data` 返回的海量数据需要本地过滤工具，用「反向追踪法」（从已知签名值反向搜索）效率最高
 - `instrument_jsvmp_source` 的 regex 模式对带模板字符串、正则字面量的代码可能误改写，AST 模式更可靠；两种模式都默认 `cache_rewritten=True`，避免重复改写
+- 前三板斧（Hook/插桩/日志）对**签名型反爬**不可用：Hook `Function.prototype.apply` 会改变 `Function.prototype.apply.toString()` 的原生性；`hook_jsvmp_interpreter(mode="proxy")` 装 Proxy 在 navigator 上，会被 `Object.getOwnPropertyDescriptors` 或 typeof 检测识别。这类检测一旦出现在 cookie 计算路径，就会导致签名废、挑战永远不过。对签名型反爬，**直接跳到第四板斧（源码级插桩）**，它不动环境只改 VMP 代码本身，是唯一通用解法。
 
 ```
 四板斧摘要（详细步骤见 references/jsvmp-analysis.md 及 references/jsvmp-source-instrumentation.md）：
@@ -940,6 +1068,24 @@ Actions:
 | ⑤ | 是否存在额外环境校验 | 用 Hook 确认是否有 navigator/screen/canvas 等值参与签名 |
 | ⑥ | 是否触发频率限制 | 降低请求频率后重试，检查响应中的限流提示 |
 
+### 签名型反爬的"挑战永远不过"排查
+
+**症状**：`navigate` 超时或返回时 `final_status == 412`，`redirect_chain` 里同一 URL 反复出现 412 响应，没有 200 跳转。
+
+**根因**：**观察者效应** —— 你在页面 JS 执行前注入了会改变环境的 hook，VMP 读到的环境和服务端预期的不一致，cookie 签名废。
+
+**排查与自救步骤**：
+
+| 步骤 | 检查项 | 动作 |
+|---|---|---|
+| ① | 是否用了 `pre_inject_hooks=["jsvmp_probe"]` 或 `["cookie_hook"]` | 立即移除 |
+| ② | 是否用了 `hook_jsvmp_interpreter(mode="proxy")` | 改 `mode="transparent"` 或不用 |
+| ③ | 是否用了 `trace_property_access(["navigator.*"])` | 立即移除 |
+| ④ | `inject_hook_preset("xhr"/"fetch")` 是否在挑战页就装了 | 改为挑战通过之后再装 |
+| ⑤ | 是否有其他 `add_init_script` 改了 `Function.prototype` 或全局对象 | 移除 |
+
+**正解**：`navigate` 一次不加任何 hook → 让挑战自然通过到 200 → 再上 `instrument_jsvmp_source(mode="ast")` 做源码级插桩 → `reload_with_hooks()` 观察。**源码级插桩是唯一不破坏签名的主动观察手段**。
+
 ### 签名值不一致排查
 
 当计算出的签名值与浏览器实际请求中的签名值不匹配时，**必须逐步对比以下每个环节**，找到第一个出现偏差的位置：
@@ -1075,14 +1221,47 @@ MCP 操作：
 
 ### 场景 9：反检测站点分析
 
+**特征**：目标站点有 Cloudflare、瑞数、极验、Akamai 等反爬检测。
+
+**关键**：必须先用"反爬类型识别"章节的标准动作判断属于哪一档，然后选对应工具链。不同档的工具**完全不能混用**。
+
+**通用准备**：
 ```
-特征：目标站点有 Cloudflare、瑞数、极验等反爬检测
-MCP 操作：
-  - launch_browser(humanize=true) → 启动人性化鼠标移动
-  - check_detection → 先验证反检测通过
-  - get_fingerprint_info → 确认指纹伪装正常
-  - bypass_debugger_trap → 绕过反调试陷阱
-  - intercept_request(url_pattern="**/*", action="log") → 监控所有请求
+- launch_browser(headless=false, humanize=true)
+- navigate(url)   # 先不加任何 hook，走"反爬类型识别"三步
+- check_detection  # 确认 Camoufox 基础反检测通过
+- get_fingerprint_info  # 查看当前指纹，确认 C++ 引擎级伪装就位
+```
+
+**分档处理**：
+
+**🔴 签名型（瑞数 / Akamai / Shape）**：
+```
+1. analyze_cookie_sources()  定位 Set-Cookie 下发的 cookie
+2. list_network_requests  找大型 VMP JS (>200KB)
+3. find_dispatch_loops(script_url)  确认 case_count >= 30
+4. instrument_jsvmp_source("**/sdenv-*.js", mode="ast", tag="xxx")
+5. reload_with_hooks(clear_log=True)
+6. get_instrumentation_log(tag_filter="xxx", type_filter="tap_get")
+   → hot_keys 告诉你 VMP 读了什么，在 Node/jsdom 补齐
+⚠️ 禁用: pre_inject_hooks / hook_jsvmp_interpreter(mode="proxy") / trace_property_access
+```
+
+**🟡 行为型（TikTok / 极验）**：
+```
+1. start_network_capture(capture_body=True)
+2. navigate(url, pre_inject_hooks=["jsvmp_probe","xhr","fetch","crypto"])
+3. 用户做挑战动作(滑块/验证码)
+4. bypass_debugger_trap  如触发反调试
+5. intercept_request(url_pattern="**/*", action="log")  全量监控
+6. 按场景 1(签名还原) 或场景 10(JSVMP+环境伪装) 继续
+```
+
+**🟢 Cloudflare 基础防护（非 JS Challenge）**：
+```
+1. Camoufox 的 C++ 引擎级伪装通常足够，先直接试 navigate
+2. 如仍被拦，检查 TLS 指纹(场景 6)
+3. 必要时打开 humanize + 真人级鼠标轨迹
 ```
 
 ### 场景 10：JSVMP + 环境伪装（jsdom/vm 沙箱执行）
@@ -1118,6 +1297,24 @@ MCP 操作：
 ```
 
 ### 场景 11：通用 JSVMP 源码级插桩（瑞数 5/6 / Akamai sensor_data / webmssdk / obfuscator.io）
+
+**场景前置检查（v2.6.0 新增）**：
+
+场景 11 的 8 步流程对三类反爬都有效，但**签名型反爬有额外约束**：
+
+| 约束 | 签名型 | 行为型/纯混淆 |
+|---|---|---|
+| 能否同时开 `pre_inject_hooks=["jsvmp_probe"]` 做对照？ | ❌ 否，会破坏签名 | ✅ 可以，用于对照 |
+| 能否同时开 `hook_jsvmp_interpreter(mode="proxy")`？ | ❌ 否 | ✅ 可以 |
+| `reload_with_hooks()` 前要不要清 cookie？ | ❌ **不要清**，第一次挑战拿到的 cookie 要留下，否则下次 reload 又要重走 412 挑战 | 随意 |
+| hot_keys 解读重点 | 看 navigator/screen/canvas/document.cookie 访问频次，这些是 cookie 签名的输入 | 看签名函数相关的字符串/加密 API 访问 |
+
+如果场景 11 对签名型反爬执行过程中 `instrument_jsvmp_source(mode="ast")` 返回
+`last_mode_used == "regex (fallback)"` 持续不变，说明 esprima 无法解析该 VMP 文件
+（可能用了太新的语法或格外复杂的闭包），此时有两个选择：
+  (a) 用 `mode="regex"` 主动改写，接受 ~80% 覆盖率
+  (b) 退到 `hook_jsvmp_interpreter(mode="transparent")` 走 runtime 观察
+对真实瑞数 sdenv*.js 来说，ast 模式应该都能成功，regex fallback 持续触发是异常信号。
 
 ```
 特征：JSVMP 算法完全封装在 opcode 分发循环 switch(...) { case N: obj[key](args); ... } 中，
@@ -1357,6 +1554,11 @@ launch_browser set_cookies  start_      search_    set_break   hook_      trace_
 25. **Cookie 归因优先于 setter hook**：分析动态 Cookie 第一步永远是 `analyze_cookie_sources`，它能区分"纯 JS 写""纯 HTTP Set-Cookie""JS 算 token + 服务端带回来"三种模式——瑞数/Akamai 最常见的第三种模式下，单纯 hook `document.cookie` setter 什么都抓不到，会浪费几小时白忙
 26. **首屏挑战页必须用 `pre_inject_hooks`**：瑞数 412 挑战、Akamai 首包检测是在"你还没来得及装 hook"的那一瞬间发生的；旧流程"launch_browser → navigate → 装 hook"完全漏掉首屏——正确做法是 `navigate(url=..., pre_inject_hooks=["xhr", "fetch", "cookie", "jsvmp_probe"])`，先走 about:blank 装好 hook 再 goto，或者用 `via_blank=True` 让之前 persistent scripts 生效
 27. **`reload_with_hooks` 取代裸 `reload`**：装完 hook 想让它先于页面 JS 跑，裸 `reload()` 不能保证顺序；用 `reload_with_hooks()` 一步到位——它不仅按 context-level init_script 的方式重载，还默认 `clear_log=True` 清空 `__mcp_jsvmp_log`/`__mcp_vmp_log`/`__mcp_prop_access_log`/`__mcp_cookie_log`，拿到的是这次重载的干净快照
+28. **反爬类型识别是 Phase 0 的 Phase 0**：先判断签名型/行为型/纯混淆，再选工具。用错档的工具不是效率差，是**根本跑不通**。
+29. **签名型反爬只有一条路**：`instrument_jsvmp_source(mode="ast")`。源码级插桩不动环境，是唯一能同时"观察 VMP"和"让挑战通过"的手段。
+30. **`pre_inject_hooks` 的正确定位是"观察 ≠ 污染"场景的便利工具**：TikTok 可用，瑞数不可用。永远不要对签名型反爬用它。
+31. **`mode="transparent"` 是 `mode="proxy"` 的签名安全备选**：只替换 prototype getter，不装 Proxy 不改 Function.prototype。比 proxy 安全一个数量级，但极严格的反爬（对 getter 函数做跨加载 identity 对比）仍能感知。源码级插桩失败再退到这里，不要一上来就用。
+32. **MCP 侧 AST 让插桩在挑战页可用**：v0.5.0 把 AST 从页面内 Acorn 改为 MCP 侧 esprima，瑞数 412 挑战页（CDN 被拦）也能跑。`last_mode_used` 长期是 `"regex (fallback)"` 说明目标有太新语法，才考虑手动换 regex 或 transparent。
 
 ---
 
@@ -1372,3 +1574,5 @@ launch_browser set_cookies  start_      search_    set_break   hook_      trace_
 | v2.3.0 | 2026-04-01 | 新增经验库系统（`cases/` 目录）：Phase 0.5 指纹快速匹配阶段（30 秒内完成技术指纹采集 → 经验库匹配 → 命中走快速路径 / 未命中走标准流程）；案例模板 `_template.md` + 知识提取提示词；首个案例：JSVMP 字节码虚拟机 + XHR 拦截器 + jsdom 环境伪装（含 58 项环境检测差异全表 + markNative 三层防御方案 + 完整浏览器指纹采集流程） |
 | v2.4.0 | 2026-04-02 | **JSVMP 双路径攻克体系**：基于实战经验重构 JSVMP 分析框架，新增路径选择决策树（路径 A 算法追踪 vs 路径 B 环境伪装）；路径 B「环境伪装六步法」完整方法论（采集→对比→分级→补丁→验证→端到端）；新增场景 10「JSVMP + 环境伪装」；标注三板斧适用边界与局限（apply 限制 / 高频日志爆炸 / 字符串表加密）；`compare_env` 覆盖范围说明及细粒度采集建议；新增 `references/jsdom-env-patches.md` 环境补丁知识库（Function.toString 三层防御 / plugins 完整模拟 / DOM 布局属性 / 30+ API 存根 / Symbol.toStringTag）；经验法则扩充至 22 条（+环境伪装优先 / Function.toString 第一杀手 / 分批采集 / Hook 顺序 / 静默拒绝信号）；解法模式新增 E: jsdom 环境伪装 |
 | v2.5.0 | 2026-04-17 | **JSVMP 路径 A 升级为四板斧（新增源码级插桩）+ 对齐 MCP v0.4.0**：适配 camoufox-reverse MCP v0.4.0（52→65 个工具）；新增第四板斧「源码级插桩」——在 HTTP 层对 VMP 脚本改写，每个 `obj[key]` / `fn(args)` 都插入 tap，对瑞数 5/6、Akamai sensor_data v2/v3、webmssdk、obfuscator.io 通用有效；新增 8 个 MCP 工具清单（`instrument_jsvmp_source`/`get_instrumentation_log`/`get_instrumentation_status`/`stop_instrumentation`/`find_dispatch_loops`/`reload_with_hooks`/`analyze_cookie_sources`/`get_runtime_probe_log`）；`hook_jsvmp_interpreter` 从单路径 apply 升级为多路径（apply/call/bind + Reflect.*/Proxy 全局对象 + timing/random）；`inject_hook_preset` 新增 `cookie`（原型链级 cookie hook）和 `runtime_probe`（低开销广谱运行时探针）两个预设；`navigate` 支持 `pre_inject_hooks` + `via_blank` + 返回 `initial_status`/`final_status`/`redirect_chain`，解决首屏挑战页 hook 失效；新增场景 11「通用 JSVMP 源码级插桩」（黄金 8 步流程）；场景 2「动态 Cookie」引入 `analyze_cookie_sources` 作为第一步归因；新增 `references/jsvmp-source-instrumentation.md` 源码级插桩专项指南（regex vs ast 模式选择、hot_keys 指纹学习法、与 hook 探针互补）；经验法则扩充至 27 条（+源码级插桩优先 / hot_keys 指纹学习法 / Cookie 归因优先于 setter hook / 首屏 pre_inject_hooks / reload_with_hooks 取代裸 reload）；新增骨架案例 `cases/universal-vmp-source-instrumentation.md` |
+
+| v2.6.0 | 2026-04-18 | **签名型反爬兼容对齐 MCP v0.5.0**：新增顶层决策框架「反爬类型三分法」（签名型/行为型/纯混淆），放在 Phase 0.5 之前作为必做识别步骤；四板斧新增"适用反爬类型"标签，明确前三板斧对签名型不可用，源码级插桩是签名型的唯一通用解；`hook_jsvmp_interpreter` 新增 `mode` 参数（"proxy"/"transparent"），transparent 模式仅替换 prototype getter 不装 Proxy，作为签名安全备选；`instrument_jsvmp_source(mode="ast")` 从页面内 Acorn 迁到 MCP 侧 esprima（零 CDN 依赖，挑战页可用），新增 `fallback_on_error` 参数和 `last_mode_used` 状态字段；`pre_inject_hooks` 参数明确标注对签名型反爬不可用（症状：redirect_chain 反复 412）；场景 9（反检测站点）按反爬类型分档重写；错误处理新增"观察者效应"专项排查；新增经验法则 28-32 条；场景 11 加签名型前置检查；引用文档 `references/jsvmp-source-instrumentation.md` 需同步更新 AST 迁移与 transparent 模式 |

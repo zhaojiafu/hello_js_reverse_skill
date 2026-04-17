@@ -82,6 +82,11 @@ Step 5 — 装兜底 hook（若 Step 2 没走 pre_inject_hooks）
   inject_hook_preset("fetch", persistent=True)
   inject_hook_preset("crypto", persistent=True)
   hook_jsvmp_interpreter(script_url="[VMP basename]")
+  # 注意：本案例针对的是"通用"场景（含签名型和行为型）。如果目标是签名型反爬
+  # （瑞数/Akamai），不要这样用 hook_jsvmp_interpreter，改为：
+  #   - instrument_jsvmp_source(mode="ast")  （首选）
+  #   - hook_jsvmp_interpreter(mode="transparent")  （备选）
+  # 参考 SKILL.md "反爬类型识别与工具选择" 章节
   bypass_debugger_trap()
 
 Step 6 — reload_with_hooks 让探针先于 VMP 生效

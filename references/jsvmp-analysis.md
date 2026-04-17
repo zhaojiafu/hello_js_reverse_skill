@@ -507,6 +507,50 @@ MCP 操作：
 
 ---
 
+## 前置判断（v2.6.0 新增）：先识别 JSVMP 所在反爬类型
+
+在选路径 A / B 之前，先判断 JSVMP 的反爬类型：
+
+```
+navigate(url) 不加任何 hook 观察 redirect_chain
+│
+├─ 反复 412 后才到 200 → 签名型 JSVMP（瑞数/Akamai）
+│   └─ 走"签名型专属路径"（见下文）
+│
+├─ 直接 200 但主请求链带签名参数 → 行为型 JSVMP（TikTok/极验）
+│   └─ 按原路径 A / 路径 B 决策树选择
+│
+└─ 直接 200 无签名参数 → 非 JSVMP 或 VMP 已被跳过
+    └─ 回 Phase 2.2 常规混淆分析
+```
+
+### 签名型 JSVMP 专属路径（v2.6.0 新增）
+
+签名型 JSVMP 与原路径 A / B 的决策树**不适用**，因为：
+- 路径 A 的前三板斧（Hook/插桩/日志）会破坏签名
+- 路径 B 的 jsdom 环境伪装成本高（58+ 项修复）
+
+签名型 JSVMP 推荐走的路：
+
+```
+1. instrument_jsvmp_source(mode="ast", tag="...")  (第四板斧)
+2. reload_with_hooks()  让插桩后的 VMP 跑完挑战
+3. get_instrumentation_log(tag_filter, type_filter="tap_get")
+4. 基于 hot_keys 补最小环境，在 jsdom 或纯 Python 侧独立跑
+   （此时 jsdom 补环境的粒度比路径 B 小得多，只补 hot_keys 显示的属性）
+```
+
+源码级插桩失败才回落：
+```
+A. hook_jsvmp_interpreter(mode="transparent")  仅 prototype getter 替换
+   - 对签名型大多数情况安全
+   - 极严格反爬仍能识别 getter identity 变化，此时真的只能走路径 B 全量 jsdom 伪装
+B. 路径 B 完整 jsdom 环境伪装（六步法）
+   - 最重但最稳，是最后的兜底
+```
+
+---
+
 ## 还原策略决策（v2.5.0 扩充源码级插桩分支）
 
 ```

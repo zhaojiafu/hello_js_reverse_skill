@@ -404,6 +404,30 @@
 [camoufox-reverse] compare_env                    → 收集完整浏览器环境（补环境基准线）
 ```
 
+#### transparent 模式示例（v0.5.0，v2.6.0 吸收）
+
+```python
+# 签名型反爬上优先这样用：只替换 prototype getter，不装 Proxy 不改 Function.prototype
+await hook_jsvmp_interpreter(
+    script_url="sdenv",
+    persistent=True,
+    mode="transparent",   # 关键
+    # track_calls / track_props / track_reflect / proxy_objects 在 transparent 下被忽略
+    max_entries=10000,
+)
+
+# 效果：window.__mcp_jsvmp_log 仍然有日志，但每条是 {type: "transparent_get", owner, key, value}
+# 不会出现 proxy_get / fn_apply / reflect_get 等 proxy 模式专属类型
+
+# 对应的 pre-inject 别名：
+await navigate(url, pre_inject_hooks=["jsvmp_probe_transparent"])
+```
+
+**transparent 模式的观察口径**：
+- ✅ 会记录：navigator.userAgent / screen.width / document.cookie（读） / location.href 等 prototype 级 getter
+- ❌ 不会记录：Function.prototype.apply 调用、Reflect.get/set、navigator.plugins[0].name（深层属性）、navigator.hardwareConcurrency（getter 在不同浏览器可能不是 prototype 级）
+- **口径比 proxy 小**，所以只用于 proxy 不能用的场合（签名型反爬）
+
 ### 使用属性访问追踪
 
 ```
@@ -498,6 +522,32 @@
 | `hook_jsvmp_interpreter` | VMP 通过 `Function.prototype.apply/call/bind` 或 `Reflect.*` 调子函数，读全局对象属性（Proxy） | VMP 在 switch/case 内部直接 `obj[key]` / `fn(args)` 的调用 |
 | `instrument_jsvmp_source` | 每一次 member access + 每一次函数调用，无论是否通过可 hook API | 不跨脚本（只改写指定 url_pattern 的那个文件） |
 | **建议**：两者同时开，互相校验 | | |
+
+#### mode="ast" 的 v0.5.0 变化（v2.6.0 吸收）
+
+```python
+# v2.5.0 / MCP v0.4.x: mode="ast" 会在页面里注入 acorn CDN script tag
+# v2.6.0 / MCP v0.5.0: mode="ast" 在 MCP 进程里用 esprima-python 解析，零页面依赖
+await instrument_jsvmp_source(
+    "**/sdenv-*.js",
+    mode="ast",                  # 默认，走 MCP 侧 esprima
+    tag="sdenv",
+    fallback_on_error=True,      # 新参数：esprima 挂就回落 regex
+)
+
+# 查看实际走了哪条路径
+status = await get_instrumentation_status()
+# status["active_patterns"][0]["last_mode_used"] == "ast" (正常)
+#   or "regex (fallback)" (esprima 对该 VMP 的语法支持不全)
+#   or "ast_page" (你显式用了 deprecated 模式)
+```
+
+**新增取值 mode="ast_page"**：
+```python
+# 仅用于 A/B 对比 v0.4.x 的旧页面内 Acorn 实现，deprecated
+# 生产不要用，挑战页会因 CDN 被拦静默失败
+await instrument_jsvmp_source("**/vmp.js", mode="ast_page")
+```
 
 ### 使用 Cookie 归因分析（v2.5.0 新增）
 

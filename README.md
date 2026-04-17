@@ -9,6 +9,7 @@
 - **JS 混淆还原**: OB混淆、控制流平坦化、eval打包、自定义VM/JSVMP 等混淆类型的分析策略
 - **JSVMP 行为追踪**: Hook/插桩/日志/源码级插桩四板斧（v2.5.0 新增第四板斧），从行为层面追踪 JS 虚拟机保护的签名生成链路，对瑞数 5/6、Akamai sensor_data、webmssdk、obfuscator.io 通用有效（详见专项指南）
 - **Cookie 归因分析**: `analyze_cookie_sources` 融合 HTTP Set-Cookie 与 JS document.cookie 日志，一次性解答"这个 Cookie 到底是谁写的"（v2.5.0 新增）
+- **反爬类型分档决策（v2.6.0）**：签名型（瑞数/Akamai）/ 行为型（TikTok/极验）/ 纯混淆 三类反爬的工具路径完全不同，内置顶层决策框架，避免"observer effect 破坏签名"的经典陷阱
 - **动态 Cookie 逆向**: eval首包、api预热、浏览器指纹等 Cookie 生成机制的破解
 - **WASM 逆向**: WebAssembly 加密模块的加载、环境补全和调用
 - **协议层对抗**: TLS 指纹检测、HTTP/2 强制、频率限制等协议层防护的应对
@@ -171,7 +172,11 @@ python main.py
 
 ## MCP 工具集成
 
-本 Skill 只围绕 [`camoufox-reverse` MCP](https://github.com/WhiteNightShadow/camoufox-reverse-mcp) 服务器组织能力（Camoufox 反检测浏览器，**65 个工具，v0.4.0+**）：
+本 Skill 只围绕 [`camoufox-reverse` MCP](https://github.com/WhiteNightShadow/camoufox-reverse-mcp) 服务器组织能力（Camoufox 反检测浏览器，**65 个工具，v0.5.0 签名型反爬兼容改造**）：
+- 源码级插桩 `instrument_jsvmp_source(mode="ast")` — MCP 侧 esprima 实现，挑战页可用
+- 签名安全观察 `hook_jsvmp_interpreter(mode="transparent")` — 仅 prototype getter 替换
+- Cookie 归因 `analyze_cookie_sources` — 区分 Set-Cookie 与 document.cookie
+- 响应链追踪 `navigate` 返回 `redirect_chain`/`final_status`，秒识反爬类型
 
 | 核心工具 | 用途 |
 |---------|------|
