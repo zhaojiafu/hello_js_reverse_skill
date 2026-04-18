@@ -2,6 +2,50 @@
 
 本目录存放已验证的逆向分析经验案例，供 Phase 0.5 指纹匹配阶段自动检索。
 
+## 🔍 高频站点速查表（v3.0.0 新增，**Phase 0 CHECK-2 必看**）
+
+> 如果你的目标站点或反爬类型在下表中，**直接跳到对应案例，不要从零分析**。
+> 关键词匹配规则：URL / 搜索到的 JS 变量名 / 请求参数名 任一命中即可。
+
+| 关键词（URL 域名 / 签名参数 / SDK 字符串） | 反爬类型 | 对应案例 / 目录 | 已验证方案 |
+|---|---|---|---|
+| `tiktok.com` / `X-Bogus` / `X-Gnarly` / `webmssdk` / `cacheOpts` | 行为型 | [`jsvmp-dual-sign-xhr-intercept-cacheOpts-jsdom-firefox.md`](./jsvmp-dual-sign-xhr-intercept-cacheOpts-jsdom-firefox.md) | jsdom 环境伪装 |
+| `douyin.com` / `a_bogus` / `_sdkGlueInit` | 行为型 | [`jsvmp-xhr-interceptor-env-emulation.md`](./jsvmp-xhr-interceptor-env-emulation.md) / (v3.0.0 待建 `jsvmp-abogus-douyin-webapp.md`) | vm 沙箱 + 自定义字符表 |
+| `nmpa.gov.cn` / `NfBCSins2OywS` / `NfBCSins2OywT` / `.e17ed02.js` / 412 挑战 | 签名型（RS 6） | [`jsvmp-ruishu6-cookie-412-sdenv.md`](./jsvmp-ruishu6-cookie-412-sdenv.md) + `site_nmpa/` 工作区目录 | sdenv 纯 Node.js |
+| `acmescripts` / `/akam/` | 签名型（Akamai） | (待建) | (待建) |
+| `acw_sc__v2` / Aliyun WAF | 签名型 | (待建) | (待建) |
+| `FSSBBIl1UgzbN7N` / `_RSG` / 200KB 混淆 JS + 412 | 签名型（RS） | 同 nmpa 案例 | sdenv |
+| `obfuscator.io` 特征（`_0x` 大量前缀） | 纯混淆 | (无专案，走通用四板斧) | AST 反混淆 |
+
+### 使用方式
+
+```
+Phase 0 CHECK-2:
+1. 目标 URL 的域名 → 查上表
+2. navigate 后 search_code 几个关键词 → 查上表
+3. 命中任一关键词 → readFile(对应案例) 并按其 "已验证定位路径" 执行
+4. 未命中 → 记录采集到的关键词，分析完后沉淀新案例
+```
+
+### 工作区已有 `site_*` 目录扫描（v3.0.0 新增）
+
+除了 cases/ 目录，**本项目工作区可能已有同站点分析残留**：
+
+```
+listDirectory(".")
+→ 看是否有 site_* 开头的目录
+→ 有 site_<target>/ → 最高权重命中（已验证代码！）
+→ 直接 listDirectory("site_<target>/") 看 sign_service.js / keys.json 等
+
+常见工作区目录命名模式：
+  site_nmpa/          (瑞数 nmpa.gov.cn 项目)
+  site_douyin/        (抖音项目)
+  site_tiktok/        (TikTok 项目)
+  <target>_<date>/    (按日期的某次分析快照)
+```
+
+**重要**：工作区里已有 `site_*` 目录 → **不要从零写新项目**，先读已有代码复用。这是红线 2 的预防。
+
 ## 使用方式
 
 - Agent 在 Phase 0.5 采集目标站点的技术指纹后，遍历本目录下的 `.md` 文件，匹配「指纹检测规则」段
@@ -64,10 +108,10 @@ RS JSVMP + Cookie 签名
 ## 新增案例
 
 1. 复制 `_template.md` 为新文件，以技术特征命名
-1.5. **归档 Session 档案**（v2.9.0 新增）：如果本次分析过程中创建了域级 Session 档案（`cases/_session_archives/<domain-hash>/`），确认断言集已写入且通过验证。Session 档案会自动被 `.gitignore` 排除，但其中的技术结论（反爬类型、hot_keys 快照）应同步体现在案例文件的「技术指纹」和「加密方案」段中。
-2. 按模板格式填写各段（v2.7.0 起模板新增「反爬类型判定」和「关键经验总结」段）
+2. 按模板格式填写各段
 3. 更新本文件的案例索引表
-4. 可选：在 `_private_mapping.json` 中添加私有域名映射
+4. 在"关键经验总结"段列 5-15 条最小可验证事实（如"X-Bogus 长度 28""webdriver === false"）——下次同站升级时可用于手动核对"哪些变了"
+5. 可选：在 `_private_mapping.json` 中添加私有域名映射
 
 ### 跨端知识提取提示词
 
