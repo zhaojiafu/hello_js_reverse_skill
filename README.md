@@ -62,17 +62,30 @@ hello_js_reverse_skill/
 ├── SKILL.md                        # 技能定义（AI Agent 读取的核心文件）
 ├── README.md                       # 项目文档
 │
-├── references/                     # 参考文档（知识库）
+├── references/                     # 参考文档（深度背景，按需读取）
 │   ├── workflow-overview.md        # 工作流总览与解法模式决策树
-│   ├── crypto-patterns.md          # 加密算法识别与 Node.js/Python 双语言还原代码
-│   ├── obfuscation-guide.md        # JS 混淆类型识别与还原策略
-│   ├── hook-techniques.md          # Hook 技术大全（13种 Hook 模板）
-│   ├── anti-debug.md               # 反调试对抗手册（7种绕过方案）
-│   ├── environment-patch.md        # 环境补全指南（VM沙箱/WASM/jQuery/XHR）
-│   ├── protocol-analysis.md        # 协议层分析（TLS/HTTP2/UA/频率限制）
-│   ├── mcp-cookbook.md              # MCP 工具使用手册（5大场景操作步骤）
-│   ├── jsvmp-analysis.md           # JSVMP 虚拟机保护专项分析指南（三板斧方法论）
-│   └── troubleshooting.md          # 错误排查指南（请求失败/签名不一致/环境问题）
+│   ├── phase-details.md            # Phase 0-5 详细操作（v3.3.0 起以 SKILL.md 为准）
+│   ├── mcp-cookbook.md             # MCP 工具场景手册（v3.3.0 起以 SKILL.md 为准）
+│   ├── mcp-tool-reference.md      # MCP 工具名迁移映射
+│   ├── experience-rules-full.md   # 经验法则完整版（v3.3.0 起以 SKILL.md 为准）
+│   ├── path-a-four-tools.md       # 路径 A 四板斧详细步骤
+│   ├── path-b-env-emulation.md    # 路径 B 环境伪装六步法
+│   ├── jsvmp-analysis.md          # JSVMP 字节码分析
+│   ├── jsvmp-source-instrumentation.md # 源码级插桩专项
+│   ├── jsdom-env-patches.md       # jsdom 环境补丁模板
+│   ├── common-pitfalls.md         # 反模式清单
+│   ├── crypto-patterns.md         # 加密算法识别与还原代码
+│   ├── obfuscation-guide.md       # JS 混淆类型识别与还原策略
+│   ├── hook-techniques.md         # Hook 技术大全
+│   ├── anti-debug.md              # 反调试对抗手册
+│   ├── environment-patch.md       # 环境补全指南
+│   ├── protocol-analysis.md       # 协议层分析
+│   └── troubleshooting.md         # 错误排查指南
+│
+├── cases/                          # 经验案例库（唯一经验库）
+│   ├── README.md                   # 高频站点速查表
+│   ├── _template.md                # 新案例模板
+│   └── *.md                        # 各站点/场景案例
 │
 ├── scripts/                        # 工具脚本
 │   ├── check-deps.sh               # 环境依赖检查（Node.js + Python）
@@ -172,8 +185,8 @@ python main.py
 
 ## MCP 工具集成
 
-本 Skill 只围绕 [`camoufox-reverse` MCP](https://github.com/WhiteNightShadow/camoufox-reverse-mcp) 服务器组织能力（Camoufox 反检测浏览器，**65 个工具，v0.5.0 签名型反爬兼容改造**）：
-- 源码级插桩 `instrument_jsvmp_source(mode="ast")` — MCP 侧 esprima 实现，挑战页可用
+本 Skill 围绕 [`camoufox-reverse` MCP](https://github.com/WhiteNightShadow/camoufox-reverse-mcp) 服务器组织能力（Camoufox 反检测浏览器，**32 个核心工具，v1.0.0 统一 API**）：
+- 源码级插桩 `instrumentation(action='install', mode="ast")` — MCP 侧 esprima 实现，挑战页可用
 - 签名安全观察 `hook_jsvmp_interpreter(mode="transparent")` — 仅 prototype getter 替换
 - Cookie 归因 `analyze_cookie_sources` — 区分 Set-Cookie 与 document.cookie
 - 响应链追踪 `navigate` 返回 `redirect_chain`/`final_status`，秒识反爬类型
@@ -181,33 +194,24 @@ python main.py
 | 核心工具 | 用途 |
 |---------|------|
 | `launch_browser` / `navigate` | 启动反检测浏览器并导航到目标页面 |
-| `search_code` / `search_code_in_script` | 在所有 JS 中搜索关键词 / 在指定脚本中精确搜索 |
-| `set_breakpoint_via_hook` | 通过 JS Hook 设置伪断点，捕获参数和返回值（支持持久化） |
-| `trace_function` | 追踪函数调用，自动记录参数和返回值（支持持久化） |
-| `hook_function` | 注入自定义 Hook（before/after/replace，支持 non_overridable 防覆盖） |
-| `inject_hook_preset` | 一键预设 Hook（xhr/fetch/crypto/websocket/debugger_bypass，默认持久化） |
-| `freeze_prototype` | 冻结原型方法防止页面 JS 覆盖 Hook |
-| `hook_jsvmp_interpreter` | **一键插桩 JSVMP 解释器**（追踪 Function.prototype.apply + 30+ 敏感属性） |
-| `get_jsvmp_log` / `dump_jsvmp_strings` | 获取 JSVMP 分析日志 / 提取字符串数组 |
-| `compare_env` | 全面收集浏览器环境，用于补环境对照 |
-| `trace_property_access` | Proxy 级别属性访问追踪 |
-| `add_init_script` | 页面加载前注入脚本（支持 persistent 跨导航重注入） |
-| `get_request_initiator` | 获取发起请求的 JS 调用栈（改进 URL 匹配 + 诊断信息） |
-| `start_network_capture` | 启动网络捕获（支持 capture_body 捕获响应体） |
+| `search_code(keyword, script_url=None)` | 在所有/指定 JS 中搜索关键词 |
+| `scripts(action='list'\|'get'\|'save')` | 列出/获取/保存脚本 |
+| `hook_function(mode='intercept'\|'trace')` | 自定义 Hook / 函数追踪（支持 non_overridable 防覆盖） |
+| `inject_hook_preset` | 一键预设 Hook（xhr/fetch/crypto/websocket/debugger_bypass/cookie/runtime_probe） |
+| `hook_jsvmp_interpreter` | 一键插桩 JSVMP 解释器（proxy / transparent 两种模式） |
+| `instrumentation(action='install'\|'log'\|'stop'\|'reload')` | 源码级插桩：HTTP 层改写 VMP + 日志 + 重载 |
+| `network_capture(action='start'\|'stop')` | 网络捕获（支持 capture_body） |
+| `list_network_requests` / `get_network_request` | 列出/获取捕获的请求 |
+| `get_request_initiator` | 获取发起请求的 JS 调用栈（黄金路径） |
 | `intercept_request` | 拦截/修改/Mock 网络请求 |
-| `check_detection` / `get_fingerprint_info` | 反检测验证与指纹查看 |
-| `bypass_debugger_trap` | 一键绕过反调试陷阱 |
+| `cookies(action='get'\|'set'\|'delete')` | Cookie 管理 |
+| `compare_env` | 全面收集浏览器环境，用于补环境对照 |
+| `verify_signer_offline` | 用真实样本离线验证签名代码 |
+| `evaluate_js` | 在页面执行任意 JS |
 | `export_state` / `import_state` | 保存/恢复浏览器状态 |
-| `find_dispatch_loops` | **[v2.5.0 新]** 扫描脚本定位字节码分发函数（while+switch，case 数过滤） |
-| `instrument_jsvmp_source` | **[v2.5.0 新]** 源码级插桩：在 HTTP 层改写 VMP，对每个 obj[key]/fn(args) 插入 tap（通用 VMP 利器） |
-| `get_instrumentation_log` / `get_instrumentation_status` / `stop_instrumentation` | **[v2.5.0 新]** 源码插桩日志（hot_keys/hot_methods/hot_functions）/ 状态 / 停止 |
-| `reload_with_hooks` | **[v2.5.0 新]** 重载让 persistent hook 先于页面 JS 执行（+ 清日志） |
-| `analyze_cookie_sources` | **[v2.5.0 新]** Cookie 归因：HTTP Set-Cookie vs JS document.cookie 融合分析 |
-| `get_runtime_probe_log` | **[v2.5.0 新]** 获取 runtime_probe 预设的广谱事件日志（xhr/fetch/canvas/WebGL/nav） |
-| `navigate(pre_inject_hooks=[...], via_blank=True)` | **[v2.5.0 增强]** 首屏挑战页预注入 hook + 返回 initial_status/final_status/redirect_chain |
-| `inject_hook_preset("cookie" | "runtime_probe")` | **[v2.5.0 增强]** 新增两个预设 |
+| `check_environment` / `reset_browser_state` | 环境自检 / 清理残留状态 |
 
-详见 `references/mcp-cookbook.md`。
+详见 SKILL.md 的「核心武器」和「工具使用最佳实践」章节。
 
 ## 逆向场景覆盖
 
@@ -228,8 +232,8 @@ python main.py
 | 环境检测 | webdriver/蜜罐/指纹 | `environment-patch.md` |
 | 反检测站点 | Cloudflare/RS/JY绕过 | SKILL.md |
 | **请求失败排查** | **Cookie/Header/时间戳/签名对比** | **`troubleshooting.md`** |
-| **通用 JSVMP 源码级插桩** | **HTTP 层源码改写 + hot_keys 指纹学习法（v2.5.0 新增）** | **`jsvmp-source-instrumentation.md`** |
-| **Cookie 归因分析** | **HTTP Set-Cookie vs JS document.cookie 融合分析** | **`mcp-cookbook.md` 场景 7** |
+| **通用 JSVMP 源码级插桩** | **HTTP 层源码改写 + hot_keys 指纹学习法** | **`jsvmp-source-instrumentation.md`** |
+| **Cookie 归因分析** | **HTTP Set-Cookie vs JS document.cookie 融合分析** | **SKILL.md 场景速查** |
 
 ## 技术栈
 
@@ -253,4 +257,14 @@ python main.py
 - **curl_cffi**: 带浏览器 TLS 指纹模拟的 HTTP 客户端
 
 ### 调试工具
-- **[camoufox-reverse MCP](https://github.com/WhiteNightShadow/camoufox-reverse-mcp) v0.4.0+**: 反检测浏览器逆向分析（65 个工具，含 JSVMP 源码级插桩 + Cookie 归因分析）
+- **[camoufox-reverse MCP](https://github.com/WhiteNightShadow/camoufox-reverse-mcp) v1.0.0**: 反检测浏览器逆向分析（32 个核心工具，统一 API，含源码级插桩 + Cookie 归因分析）
+
+## 版本记录
+
+| 版本 | 日期 | 要点 |
+|------|------|------|
+| v3.3.0 | 2026-04-19 | 核心层回归扩容：Phase 1-5 详细动作 + 10 个场景速查 + 经验法则 24 条回迁核心层；案例层强化（禁动清单 + UA 分支矩阵） |
+| v3.2.1 | 2026-04-19 | Phase 0.5.1 强化案例复用策略；经验法则第 11 条重写 |
+| v3.2.0 | 2026-04-18 | 移除 MCP session 依赖，Checklist 压缩到三项，cases/ 成为唯一经验库 |
+| v3.1.0 | 2026-04-18 | SKILL.md 瘦身，references/ 拆分子文档，工具引用对齐 MCP 合并 API |
+| v3.0.0 | 2026-04-18 | 硬约束 Checklist + 红线四条 + 经验法则压缩 |
