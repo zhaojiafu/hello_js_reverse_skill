@@ -10,7 +10,8 @@ description: >
   v3.0.0 硬约束 Checklist + 红线四条 + 经验法则压缩。
   v3.1.0 SKILL.md 瘦身（核心层 + references/ 按需加载），工具引用对齐 MCP 合并 API。
   v3.2.0 移除 MCP session 依赖，Checklist 从五项压缩到三项，cases/ 成为唯一经验库。
-  v3.3.0 核心层回归扩容：Phase 1-5 详细动作 + 10 个场景速查 + 经验法则 24 条回迁核心层。
+  v3.3.0 核心层回归扩容：Phase 1-5 详细动作 + 10 个场景速查 + 经验法则回迁核心层。
+  v3.3.1 经验法则精简至 22 条：移除单站点经验，合并 evaluate_js 规则。
 argument-hint: "<目标URL> [需要分析的加密参数名, 如 sign, m, token]"
 ---
 
@@ -1234,39 +1235,36 @@ verify_signer_offline(
 
 ---
 
-## 经验法则（24 条）
+## 经验法则（22 条）
 
 1. **反爬类型识别是 Phase 0 的 Phase 0**：不加 hook 先 navigate，看 redirect_chain + initial_status + 加载 JS，按三分法判断。先判类型再选工具
 2. **协议优先 = 最终代码不依赖浏览器**：判定测试——无 X11 Docker 里跑 24 小时能否稳定。不能就是违规
 3. **经验库命中优先级**：cases/<已有案例> 直接复用，不要从零分析
 4. **Hook 必须在 SDK 加载前安装**：用 `instrumentation(action='reload')` 让 Hook 在 SDK 之前生效；否则 SDK 保存的是 Hook 前引用
 5. **JSVMP 的寄存器数就是分叉判断依据**：看到 `u[xxx]: x(offset, t, this, arguments, 0, N)` 时，N 是区分函数的指纹
-6. **环境补丁前必须确认签名函数入口**（六步法步骤 0.5）：否则可能补 58 项环境后发现入口错了
-7. **cacheOpts / _SdkGlueInit / enablePathList 三件套**：webmssdk 系 SDK 激活的必要条件。没激活 → 拦截器不工作
-8. **case 中的"可验证事实清单"是经验资产**：在 case 文件列出最小可验证事实，下次同站升级时逐条手动核对找出"哪些变了"
-9. **verify_signer_offline 是协议代码的 unit test**：用 N 个真实样本离线验证，字符级定位首偏差点；每次改完代码先跑一次，别请真服务端猜
-10. **想放弃时先回查 cases/ 和 common-pitfalls.md**：绝大多数"想放弃"的场景，是踩了已知反模式或漏读了相似 case
-11. **命中案例后必须精读踩坑记录并内化为约束**：案例的核心价值是踩坑记录和站点风格，不是代码。Phase 1-5 仍然正常走，但 Phase 4 编码时每个实现决策必须回查案例踩坑记录。禁止只提取方案方向就关掉案例自己写
-12. **JSVMP 先选路径再动手**：识别到 JSVMP 后先判断走路径 A（算法追踪）还是路径 B（环境伪装），不要默认走三板斧
-13. **JSVMP 中 String.fromCharCode 是高频信号**：VM 解释器大量使用字符编码操作构造字符串
-14. **签名不一致时逐环节对比**：原始输入 → 拼接字符串 → 时间戳 → 随机串 → 中间摘要 → 最终密文，找到第一个偏差点
-15. **Python `execjs` 复用 context**：编译一次 `ctx = execjs.compile(js_code)` 后多次 `ctx.call()`，避免重复创建运行时
-16. **Hook 必须持久化 + 防覆盖**：`inject_hook_preset(persistent=True)` + `hook_function(..., non_overridable=True)` 防止页面 JS 覆盖你的 Hook
-17. **`search_code(keyword, script_url=url)` 定位大文件**：JSVMP 文件通常 200KB+，在指定脚本中搜索，获取前后上下文
-18. **`compare_env` 是补环境的起点**：先在 Camoufox 中采集环境基准数据，再用 `evaluate_js` 分批采集细粒度值，与 jsdom 逐项 diff
-19. **JSVMP 环境伪装优先于算法追踪**：如果 JSVMP 只是一个"签名黑箱"且可以在 jsdom 中加载执行，优先走路径 B，比追踪字节码执行快 10 倍
-20. **Function.prototype.toString 是 jsdom 环境伪装的第一杀手**：jsdom 所有 DOM 方法的 toString() 会暴露实际 JS 代码，必须用 WeakSet + 实例级覆写 + 源码模式正则三层防御
-21. **环境对比要分批采集**：单次 evaluate_js 代码太长会报错，分 4-5 批（navigator / screen+window / document+performance+toString / DOM+Canvas+WebGL+Audio）
-22. **jsdom 环境补丁必须在 JSVMP 脚本加载前完成**：XHR Hook 的安装顺序决定能否截获最终 URL（我方 Hook → JSVMP 加载 → JSVMP 保存 Hook 后的引用）
-23. **env-patch 行数越多越不稳**：jsdom 环境伪装的 env-patch 有合理体量（Firefox UA ~600-650 行，Chrome UA ~650-700 行）。超过 800 行几乎必然有错误补丁。加代码必须"先证明需要（hook_function mode='trace'）→ 加 → 验证请求成功 → 保留；否则回退"循环，禁止"先加上保险"式编码
-24. **UA 与 API 矩阵必须自洽**：Firefox UA 下严禁补 `userAgentData / connection / getBattery / window.chrome / performance.memory`（Chrome 独有）；Chrome UA 下严禁补 Firefox 独有 API。每次写 env-patch 先确认目标 UA 分支，按对应清单补，不跨分支混补
+6. **环境补丁前必须确认签名函数入口**（六步法步骤 0.5）：否则可能补大量环境后发现入口错了
+7. **case 中的"可验证事实清单"是经验资产**：在 case 文件列出最小可验证事实，下次同站升级时逐条手动核对找出"哪些变了"
+8. **verify_signer_offline 是协议代码的 unit test**：用 N 个真实样本离线验证，字符级定位首偏差点；每次改完代码先跑一次，别请真服务端猜
+9. **想放弃时先回查 cases/ 和 common-pitfalls.md**：绝大多数"想放弃"的场景，是踩了已知反模式或漏读了相似 case
+10. **命中案例后必须精读踩坑记录并内化为约束**：案例的核心价值是踩坑记录和站点风格，不是代码。Phase 1-5 仍然正常走，但 Phase 4 编码时每个实现决策必须回查案例踩坑记录。禁止只提取方案方向就关掉案例自己写
+11. **JSVMP 先选路径再动手**：识别到 JSVMP 后先判断走路径 A（算法追踪）还是路径 B（环境伪装），不要默认走三板斧
+12. **JSVMP 中 String.fromCharCode 是高频信号**：VM 解释器大量使用字符编码操作构造字符串
+13. **签名不一致时逐环节对比**：原始输入 → 拼接字符串 → 时间戳 → 随机串 → 中间摘要 → 最终密文，找到第一个偏差点
+14. **Python `execjs` 复用 context**：编译一次 `ctx = execjs.compile(js_code)` 后多次 `ctx.call()`，避免重复创建运行时
+15. **Hook 必须持久化 + 防覆盖**：`inject_hook_preset(persistent=True)` + `hook_function(..., non_overridable=True)` 防止页面 JS 覆盖你的 Hook
+16. **`search_code(keyword, script_url=url)` 定位大文件**：JSVMP 文件通常 200KB+，在指定脚本中搜索，获取前后上下文
+17. **`compare_env` 是补环境的起点**：先在 Camoufox 中采集环境基准数据，再用 `evaluate_js` 分批采集细粒度值，与 jsdom 逐项 diff
+18. **JSVMP 环境伪装优先于算法追踪**：如果 JSVMP 只是一个"签名黑箱"且可以在 jsdom 中加载执行，优先走路径 B，比追踪字节码执行快 10 倍
+19. **Function.prototype.toString 是 jsdom 环境伪装的第一杀手**：jsdom 所有 DOM 方法的 toString() 会暴露实际 JS 代码，必须用 WeakSet + 实例级覆写 + 源码模式正则三层防御
+20. **环境对比要分批采集**：单次 evaluate_js 代码太长会报错，分 4-5 批（navigator / screen+window / document+performance+toString / DOM+Canvas+WebGL+Audio）
+21. **jsdom 环境补丁必须在 JSVMP 脚本加载前完成**：XHR Hook 的安装顺序决定能否截获最终 URL（我方 Hook → JSVMP 加载 → JSVMP 保存 Hook 后的引用）
+22. **evaluate_js 必须用 IIFE 包装 + 显式 return 对象**：`(() => { ...; return { key: value }; })()`。顶层 `var/let/const` 会报 "expected expression"（Playwright expression 模式限制）；返回 undefined 或不可序列化值（DOM 节点/循环引用）会报 "JSON.parse: unexpected character"。两种错误根因不同，前者改包装，后者改返回值类型
 
 ### 补充说明
 
 - 规则 1-10 是**每次分析都会用到**的高频规则
-- 规则 11 是**命中案例时**的行为约束
-- 规则 12-22 是**JSVMP / 环境伪装场景**的专项规则
-- 规则 23-24 是**环境伪装编码纪律**，防止过度工程和 UA 混补
+- 规则 11-21 是**JSVMP / 环境伪装场景**的专项规则
+- 规则 22 是**工具使用纪律**，evaluate_js 防坑
 
 ---
 
